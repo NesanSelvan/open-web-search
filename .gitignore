@@ -19,3 +19,6 @@ profiles/
 # ("does not have a commit checked out"), and its prompt store is not this
 # project's source anyway.
 .devcli/
+
+# Claude Code session state and project memory: local only, never pushed.
+.claude/
