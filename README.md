@@ -153,6 +153,8 @@ Each entry in `results[]`:
   "timing_ms": {
     "identity_wait_ms": 0,
     "serp_cache_hit": false,
+    "google_ms": 1145,
+    "serp_phases_ms": { "tab": 0, "commit": 175, "results": 523, "resolve": 113, "dwell|resolve": 445, "release": 0 },
     "scrape_ms": 1201,
     "scrape_deadline_ms": 1200,
     "timed_out_pages": 1,
@@ -163,9 +165,12 @@ Each entry in `results[]`:
 ```
 
 **Reading `timing_ms`.** `identity_wait_ms` is pool pressure, not search work — if
-it dominates, add identities rather than tuning code. `per_page_ms` is keyed by
-host on purpose: a slow request is almost always *one* slow site, and an aggregate
-number hides which.
+it dominates, add identities rather than tuning code. `serp_phases_ms` splits the
+search itself: `commit` is the engine's time to first byte, `results` how long until
+enough organic results were in the DOM, `dwell|resolve` the jittered pause on the
+page overlapped with resolving the redirect wrappers; a large `tab` means Chrome
+had to be relaunched. `per_page_ms` is keyed by host on purpose: a slow request is
+almost always *one* slow site, and an aggregate number hides which.
 
 **The deadline is per-request, not per-page.** Pages still in flight when
 `scrape_deadline_ms` expires come back as `track: "timeout"` with `status: 0` and
@@ -308,7 +313,8 @@ POST /search
    ├─ ② lease identity      warm Chrome profile + fixed fingerprint (+ optional exit)
    │
    ├─ ③ search              real Chrome, headful, under Xvfb
-   │                        consent → block check → jittered dwell → read the DOM
+   │                        read the DOM the moment results land · dwell while
+   │                        the redirect wrappers resolve
    │
    ├─ ④ release             cooldown 20–45s jittered · a block quarantines instead
    │
@@ -325,9 +331,10 @@ spends nothing.
 
 | | |
 |---|---|
-| Search, new query | **~2.5s** — ≈860ms of that is the engine's own response |
-| Search, repeated | **~60ms** |
-| Search + scrape 3 pages | ~3s, bounded by `scrape_deadline_ms` |
+| Search, new query | **~1.2s** warm (0.7–2.3s measured) — engine time to first byte, results landing in the DOM, a jittered dwell |
+| Search, repeated | **~30ms** |
+| Search + scrape | search + at most `scrape_deadline_ms` (1.2s default) |
+| First search after idle | +~1.3s for a Chrome relaunch; `WS_CONTEXT_IDLE_TTL_S` sets how often that happens |
 
 Throughput is `identities ÷ cooldown`. Each warm identity holds a live Chrome, so
 budget ~1 GB of RAM per identity and set `WS_MAX_OPEN_CONTEXTS` to match — more
@@ -420,6 +427,7 @@ All are prefixed `WS_`; see [`.env.example`](.env.example) for the full set.
 | `WS_COOLDOWN_MIN_S` / `_MAX_S` | `20` / `45` | Per-identity cooldown, jittered |
 | `WS_MAX_OPEN_CONTEXTS` | `2` | Live Chromes. **≥ identity count** |
 | `WS_MAX_TABS_PER_CONTEXT` | `6` | Tabs are the cheap axis: ~55ms vs ~1330ms |
+| `WS_CONTEXT_IDLE_TTL_S` | `120` | Reap an idle Chrome after this. Relaunch costs ~1.3s on the next search; idle Chrome costs ~150MB |
 | `WS_SERP_CACHE_TTL_S` | `21600` | 6h. A repeated query must not spend an identity |
 | `WS_MAX_IN_FLIGHT` / `WS_MAX_QUEUED` | `8` / `32` | Past both, callers get `503` + `Retry-After` |
 | `WS_QUERY_SUFFIX` | *(empty)* | Appended to every non-`raw` query |

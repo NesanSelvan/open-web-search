@@ -29,7 +29,7 @@ import random
 import time
 from typing import AsyncIterator
 
-from playwright.async_api import BrowserContext, Playwright, async_playwright
+from playwright.async_api import BrowserContext, Page, Playwright, async_playwright
 
 from app.search.identity import Identity
 from app.settings import Settings
@@ -60,8 +60,20 @@ def _proxy_dict(ident: Identity) -> dict | None:
 
 
 async def _launch(pw: Playwright, ident: Identity, settings: Settings) -> BrowserContext:
+    # A Chrome that was SIGKILLed (container stop, OOM) leaves its Singleton files
+    # behind, and the lock names the OLD container's hostname — so the next launch
+    # believes another machine holds the profile and, being headful, sits on a
+    # "profile in use" dialog until Playwright gives up. Measured: 180s per
+    # search on that identity after every redeploy. We are the only launcher of
+    # this profile, so a lock present before we start is always stale.
+    for name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+        with contextlib.suppress(OSError):
+            (ident.profile_dir / name).unlink(missing_ok=True)
     return await pw.chromium.launch_persistent_context(
         user_data_dir=str(ident.profile_dir),
+        # Playwright's default is 180s. A launch that has not produced a browser
+        # in 30s is wedged; fail it so the search retries on another identity.
+        timeout=30_000,
         channel=settings.chrome_channel,
         headless=settings.headless,
         args=_ARGS,
@@ -92,6 +104,10 @@ class BrowserManager:
         # and tens of MB; a second browser costs ~1330ms and ~1GB. The semaphore
         # stops one burst opening a hundred tabs in a single Chrome.
         self._tab_sems: dict[str, asyncio.Semaphore] = {}
+        # The search tab each identity keeps between requests (see search_tab),
+        # and the in-flight "blank it" task from its last search (see park).
+        self._search_tabs: dict[str, Page] = {}
+        self._parking: dict[str, asyncio.Task] = {}
         self._last_used: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._guard = asyncio.Lock()
@@ -126,6 +142,10 @@ class BrowserManager:
         ctx = self._contexts.pop(ident_id, None)
         self._last_used.pop(ident_id, None)
         self._tab_sems.pop(ident_id, None)
+        self._search_tabs.pop(ident_id, None)
+        parking = self._parking.pop(ident_id, None)
+        if parking is not None:
+            parking.cancel()
         if ctx is not None:
             log.info("closing context %s (%s)", ident_id, reason)
             with contextlib.suppress(Exception):
@@ -214,6 +234,44 @@ class BrowserManager:
                 await ctx.set_geolocation({"latitude": geo[0], "longitude": geo[1]})
         return ctx
 
+    async def search_tab(self, ident: Identity) -> Page:
+        """The one tab this identity searches from, created on first use.
+
+        A search leases its identity exclusively, so the tab is never shared.
+        Opening and closing a fresh tab per search measured 90–920ms; navigating
+        one that already exists is ~20ms. The tab is parked on about:blank between
+        searches, so it holds no page and runs no scripts while idle.
+        """
+        ctx = await self.context(ident)
+        parking = self._parking.pop(ident.id, None)
+        if parking is not None:
+            with contextlib.suppress(Exception):
+                await parking
+        tab = self._search_tabs.get(ident.id)
+        if tab is not None and not tab.is_closed():
+            return tab
+        # A persistent context opens with one blank tab; use it rather than
+        # leaving it around and opening another.
+        blank = next((p for p in ctx.pages if p.url == "about:blank" and not p.is_closed()), None)
+        tab = blank or await ctx.new_page()
+        self._search_tabs[ident.id] = tab
+        return tab
+
+    def park(self, ident: Identity, tab: Page) -> None:
+        """Send the search tab to about:blank without making the request wait.
+
+        The identity is cooling for 20s+ before it can search again, so the
+        unload happens in the background; `search_tab` joins it before handing
+        the tab out again.
+        """
+
+        async def blank() -> None:
+            with contextlib.suppress(Exception):
+                await tab.goto("about:blank", timeout=5_000)
+
+        self._last_used[ident.id] = time.monotonic()
+        self._parking[ident.id] = asyncio.create_task(blank())
+
     @contextlib.asynccontextmanager
     async def page(self, ident: Identity, geo: tuple[float, float] | None = None):
         """A tab on this identity's shared context.
@@ -253,6 +311,10 @@ class BrowserManager:
             self._contexts.pop(ident_id, None)
             self._last_used.pop(ident_id, None)
             self._tab_sems.pop(ident_id, None)
+            self._search_tabs.pop(ident_id, None)
+            parking = self._parking.pop(ident_id, None)
+            if parking is not None:
+                parking.cancel()
         if self._pw is not None:
             with contextlib.suppress(Exception):
                 await self._pw.stop()

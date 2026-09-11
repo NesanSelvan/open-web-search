@@ -8,6 +8,7 @@ the behaviour that gets an exit burnt.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import logging
 import random
@@ -71,13 +72,38 @@ _EXTRACT_JS = """
       wrapped: isWrapper
     });
   }
-  return out;
+  // Whether a normal results page rendered at all. If it did and `items` is still
+  // empty, the fault is OURS — see ExtractionFailed.
+  return { items: out, markup: !!document.querySelector('div#rso, div#search') };
 }
 """
 
-# Markup that proves Google rendered a normal results page. If this is present and
-# we still extracted nothing, the fault is OURS — see ExtractionFailed.
-_RESULTS_MARKUP = "div#rso, div#search"
+# Enough ORGANIC results for this request — or the page has parsed, has some, and
+# no more have arrived for a beat. Counted with the same host filter the
+# extractor applies: a page can carry a dozen `a h3` in video and "people also
+# ask" units before a single organic result is injected, and DOMContentLoaded can
+# fire before that injection — reading on either signal alone returned an empty
+# page and burnt three attempts on a healthy identity. Waiting for the `load`
+# event instead cost 2.6s on a page with six results, all of it images. Polled
+# in-page, so it costs no devtools round trips while Google's own scripts are
+# busy on the main thread.
+_RESULTS_READY_JS = """
+(n) => {
+  let organic = 0;
+  for (const a of document.querySelectorAll('a')) {
+    if (!a.querySelector('h3')) continue;
+    let u; try { u = new URL(a.href); } catch { continue; }
+    const g = /(^|\\.)google\\.[a-z.]+$/.test(u.hostname);
+    if (!g || u.pathname === '/goto' || u.pathname === '/url') organic++;
+  }
+  if (organic >= n) return true;
+  if (organic === 0) return false;
+  const now = performance.now();
+  const seen = window.__owsReady || (window.__owsReady = { count: -1, since: now });
+  if (seen.count !== organic) { seen.count = organic; seen.since = now; return false; }
+  return document.readyState !== 'loading' && now - seen.since > 250;
+}
+"""
 
 _BLOCK_MARKERS = (
     "our systems have detected unusual traffic",
@@ -128,8 +154,24 @@ def build_query(
     return q
 
 
+# The consent surfaces Google actually serves: the consent.google.com interstitial,
+# and the in-page dialog whose two buttons have carried these ids for years.
+_CONSENT_MARKERS = "form[action*='consent'], #L2AGLb, #W0wltc, div[aria-modal='true'] button"
+
+
 async def _dismiss_consent(page: PWPage) -> None:
-    """Click through a consent interstitial if one is shown. Best effort."""
+    """Click through a consent interstitial if one is shown. Best effort.
+
+    Look before scanning. `get_by_role(name=...)` computes accessible names for
+    the whole document, and on a 1.6MB SERP that measured 350–850ms — paid three
+    times, on every search, for a dialog a warmed profile never sees again. One
+    CSS query settles the common case in a few milliseconds.
+    """
+    try:
+        if "consent.google" not in page.url and not await page.locator(_CONSENT_MARKERS).count():
+            return
+    except Exception:
+        return
     for label in ("Accept all", "I agree", "Reject all"):
         try:
             button = page.get_by_role("button", name=label)
@@ -175,8 +217,14 @@ async def _resolve_wrapped(items: list[dict], ident: Identity) -> list[dict]:
         scheme, _, hostport = ident.proxy.server.partition("://")
         proxy = f"{scheme}://{auth}{hostport}"
 
+    # HTTP/2 so the redirects share one connection: seven parallel HTTP/1.1
+    # requests meant seven TLS handshakes, and the slowest one set the pace.
     async with httpx.AsyncClient(
-        follow_redirects=False, timeout=12.0, headers={"User-Agent": ident.user_agent}, proxy=proxy
+        http2=True,
+        follow_redirects=False,
+        timeout=12.0,
+        headers={"User-Agent": ident.user_agent},
+        proxy=proxy,
     ) as client:
 
         async def one(item: dict) -> dict | None:
@@ -210,51 +258,110 @@ async def _search_once(
     settings: Settings,
     referer: str | None,
     browsers: BrowserManager | None = None,
+    timing: dict | None = None,
 ) -> list[SearchResult]:
     params = {"q": query, "num": str(min(limit + 5, 20)), "hl": "en", "gl": ident.country.lower()}
     url = f"{_SEARCH_URL}?{urllib.parse.urlencode(params)}"
 
-    # A kept-open context saves ~1.3s of the ~2.7s a search costs. Scripts pass no
-    # manager and fall back to a one-shot launch.
+    # Where the SERP fetch spends its time, phase by phase. `google_ms` alone says
+    # "the search was slow"; this says which step, which is the only thing that
+    # makes a slow search actionable.
+    phases: dict[str, int] = {}
+    mark = time.perf_counter()
+
+    def lap(name: str) -> None:
+        nonlocal mark
+        now = time.perf_counter()
+        phases[name] = int((now - mark) * 1000)
+        mark = now
+
+    # A kept-open context saves ~1.3s of the ~2.7s a search costs, and one
+    # long-lived tab per identity saves the 90–920ms a fresh tab measured.
+    # Scripts pass no manager and fall back to a one-shot launch.
     if browsers is not None:
-        ctx = await browsers.context(ident)
+        page = await browsers.search_tab(ident)
         owned = None
     else:
         owned = chrome_context(ident, settings)
         ctx = await owned.__aenter__()
+        page = await ctx.new_page()
+    lap("tab")
+
+    async def read() -> dict:
+        """Wait until enough results exist (or parsing is over), then read once.
+
+        The old sequence — DOMContentLoaded, consent scan, block scan, a second
+        selector wait — spent 0.7–1.8s AFTER the results were already in the DOM,
+        because every devtools call queues behind Google's own scripts on the
+        page's main thread. Results are usable the moment they are attached.
+        """
+        try:
+            await page.wait_for_function(
+                _RESULTS_READY_JS, arg=limit, polling=50, timeout=8_000
+            )
+        except Exception:
+            pass                      # read whatever is there; the caller decides
+        # Verified against a re-read after the `load` event on pages with fewer
+        # organics than asked for: the counts matched every time, so the early
+        # read is not leaving results behind.
+        return await page.evaluate(_EXTRACT_JS)
 
     try:
-        page = await ctx.new_page()
         try:
             # A missing referrer on a search navigation is a scored anomaly, so we
             # always arrive from somewhere.
             await page.goto(
                 url,
                 referer=referer or "https://www.google.com/",
-                wait_until="domcontentloaded",
+                wait_until="commit",
                 timeout=30_000,
             )
-            await _dismiss_consent(page)
+            lap("commit")
 
-            if await _is_blocked(page):
+            data = await read()
+            lap("results")
+            if not data["items"] and "/sorry/" not in page.url:
+                # No results: maybe a consent interstitial. Clear it and read again.
+                await _dismiss_consent(page)
+                data = await read()
+                lap("consent_retry")
+
+            raw = data["items"]
+            has_results_markup = bool(data["markup"])
+            if not raw and await _is_blocked(page, deep=True):
                 raise Blocked(f"identity={ident.id}")
 
-            try:
-                await page.wait_for_selector("a h3", timeout=8_000)
-            except Exception:
-                if await _is_blocked(page, deep=True):
-                    raise Blocked(f"identity={ident.id}")
-                raise Blocked(f"no results rendered (identity={ident.id})")
+            # Dwell on the page while the wrappers resolve. What the site can
+            # observe is how long the tab stays on the results page — not when we
+            # read the DOM over the devtools protocol — so the jittered pause and
+            # the network round trips overlap instead of queueing. Short and
+            # jittered on purpose: the value is that it VARIES, not that it is long.
+            # Resolve a small buffer over `limit` so a dead redirect still leaves
+            # enough results, but not the whole page — each one is a round trip.
+            resolved: list[dict] = []
+            if raw:
 
-            # A beat of dwell time before reading — instant scrape-and-leave is a
-            # behavioural signal in its own right. Kept short and jittered: the
-            # value is that it VARIES, not that it is long.
-            await asyncio.sleep(random.uniform(settings.dwell_min_s, settings.dwell_max_s))
+                async def timed_resolve() -> list[dict]:
+                    t0 = time.perf_counter()
+                    try:
+                        return await _resolve_wrapped(raw[: limit + 2], ident)
+                    finally:
+                        phases["resolve"] = int((time.perf_counter() - t0) * 1000)
 
-            raw = await page.evaluate(_EXTRACT_JS)
-            has_results_markup = bool(await page.locator(_RESULTS_MARKUP).count())
+                resolved, _ = await asyncio.gather(
+                    timed_resolve(),
+                    asyncio.sleep(random.uniform(settings.dwell_min_s, settings.dwell_max_s)),
+                )
+            lap("dwell|resolve")
         finally:
-            await page.close()
+            # Leaving the results page ends the visit either way. The kept tab is
+            # blanked off the request path: unloading a SERP measured 66–354ms,
+            # and the identity cannot search again for 20s+ regardless.
+            if owned is None and browsers is not None:
+                browsers.park(ident, page)
+            else:
+                await page.close()
+            lap("release")
     finally:
         if owned is not None:
             await owned.__aexit__(None, None, None)
@@ -268,10 +375,9 @@ async def _search_once(
                 "SERP markup has probably changed, run scripts/debug_serp.py"
             )
         raise Blocked(f"empty result set (identity={ident.id})")
-
-    # Resolve a small buffer over `limit` so a dead redirect still leaves enough
-    # results, but not the whole page — each one is a network round trip.
-    resolved = await _resolve_wrapped(raw[: limit + 2], ident)
+    if timing is not None:
+        timing["serp_phases_ms"] = phases
+    log.info("serp ok identity=%s raw=%d resolved=%d phases=%s", ident.id, len(raw), len(resolved), phases)
     if not resolved:
         raise ExtractionFailed(f"every result failed to resolve (identity={ident.id})")
 
@@ -364,7 +470,8 @@ class GoogleSearcher:
 
             try:
                 results = await _search_once(
-                    ident, query, limit, self._s, referer=None, browsers=self._browsers
+                    ident, query, limit, self._s, referer=None, browsers=self._browsers,
+                    timing=timing,
                 )
             except ExtractionFailed as exc:
                 # Our parser, not their block. Release as ERROR so the identity
