@@ -89,7 +89,35 @@ curl -sS -X POST localhost:8080/search \
 <br>
 
 ```json
-{{FULL_JSON}}
+{
+  "query": "Skyr Yogurt nutrition per 100g",
+  "results": [
+    {
+      "url": "https://www.fatsecret.co.in/calories-nutrition/milky-mist/skyr-high-protein-plain-yogurt/100g",
+      "title": "Calories in Milky Mist Skyr High Protein Plain Yogurt",
+      "snippet": "There are 101 calories in 100 g of Milky Mist Skyr High Protein Plain Yogurt. Cals 101 Fat 2.1 g Carbs 9.5 g Prot 11 g",
+      "rank": 1,
+      "page_title": "Calories in Milky Mist Skyr High Protein Plain Yogurt and Nutrition Facts",
+      "status": 200,
+      "track": "cache",
+      "final_url": "https://www.fatsecret.co.in/calories-nutrition/milky-mist/skyr-high-protein-plain-yogurt/100g",
+      "markdown": "| | |\n\n| [Milky Mist](https://www.fatsecret.co.in/calories-nutrition/milky-mist) |\n\n| Food database and calorie counter | |\n\n# Skyr High Protein Plain Yogurt\n\n| **Source:**[fatsecret Platform API](https://platform.fatsecret.com/api)***Based on an RDI of 2000 calories** Photos | | Nutritional Summary: Related Yoghurt from Milky Mist: More products from Milky Mist: Other types of Yoghurt: |\n\n| 5% | of RDI* (101 cal) | |\n\n| Calorie Breakdown: | |\n\n| | | |\n\n| Cals 101 | | Fat 2.1g | | Carbs 9.5g | | Prot 11g |\n\n| There are **101 calories** in 100 g of Milky Mist Skyr High Protein Plain Yogurt. |\n| Calorie Breakdown: **19% fat** , 38% carbs, 44% prot. |\n\n| [Blueberry Lassi](https://www.fatsecret.co.in/calories-nutrition/milky-mist/blueberry-lassi/100ml) | |\n| [Fruit Yoghurt Peach](https://www.fatsecret.co.in/calories-nutrition/milky-mist/fruit-yoghurt-peach/100g) | |\n| [Greek Yogurt Honey & Fig](https://www.fatsecret.co.in/calories-nutrition/milky-mist/greek-yogurt-honey-fig/100g) | |\n| [Skyr Iceland Yogurt Blueberry](https://www.fatsecret.co.in/calories-nutrition/milky-mist/skyr-iceland-yogurt-blueberry/100g) | |\n| [Curd](https://www.fatsecret.co.in/calories-nutrition/milky-mist/curd/100g) | |\n| [Fruit Yoghurt Mango](https://www.fatsecret.co.in/calories-nutrition/milky-mist/fruit-yoghurt-mango/100g) | |\n| | [**View More Milky Mist Yoghurt Products**](https://www.fatsecret.co.in/calories-nutrition/search?q=Milky+Mist+Yoghurt) |\n\n| [High Protein Low Fat Paneer](https://www.fatsecret.co.in/calories-nutrition/milky-mist/high-protein-low-fat-paneer/100g) | |\n| [Paneer](https://www.fatsecret.co.in/calories-nutrition/milky-mist/paneer/100g) | |\n| [Fresh Cream](https://www.fatsecret.co.in/calories-nutrition/milky-mist/fresh-cream/100g) | |\n| [Butter](https://www.fatsecret.co.in/calories-nutrition/milky-mist/butter/100g) | |\n| [Dahi](https://www.fatsecret.co.in/calories-nutrition/milky-mist/dahi/100g) | |\n| | **[View all Milky Mist Products](https://www.fatsecret.co.in/calories-nutrition/milky-mist)** |\n\n| [Lowfat Plain Yoghurt](https://www.fatsecret.co.in/calories-nutrition/generic/lowfat-plain-yoghurt) | |\n| [Fruit Yoghurt (Nonfat)](<https://www.fatsecret.co.in/calories-nutrition/generic/fruit-yoghurt-(nonfat)>) | |\n| [Nonfat Plain Yoghurt](https://www.fatsecret.co.in/calories-nutrition/generic/nonfat-plain-yoghurt) | |\n| [Vanilla Yoghurt (Lowfat)](<https://www.fatsecret.co.in/calories-nutrition/generic/vanilla-yoghurt-(lowfat)>) | |\n| [Plain Yoghurt (Lowfat)](<https://www.fatsecret.co.in/calories-nutrition/generic/plain-yoghurt-(lowfat)>) | |\n| [Plain Yoghurt](https://www.fatsecret.co.in/calories-nutrition/generic/plain-yoghurt) | |\n| | [**View More Yoghurt Nutritional Info**](https://www.fatsecret.co.in/calories-nutrition/food/yoghurt) |\n\n\tPlease note that some foods may not be suitable for some people and you are urged to seek the advice of a physician before beginning any weight loss effort or diet regimen. Although the information provided on this site is presented in good faith and believed to be correct, fatsecret makes no representations or warranties as to its completeness or accuracy and all information, including nutritional values, is used by you at your own risk. All trademarks, copyright and other forms of intellectual property are property of their respective owners.\n",
+      "links": null,
+      "html": null
+    }
+  ],
+  "timing_ms": {
+    "identity_wait_ms": 0,
+    "serp_cache_hit": true,
+    "scrape_ms": 0,
+    "scrape_deadline_ms": 8000,
+    "timed_out_pages": 0,
+    "per_page_ms": {
+      "www.fatsecret.co.in": 0
+    },
+    "total_ms": 60
+  }
+}
 ```
 
 </details>
