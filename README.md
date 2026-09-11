@@ -53,15 +53,13 @@ blocks disappear.
      │           plain HTTP first (~300ms) → browser only when needed
      │           per-domain rate limits, geolocation and cache TTL
      │
-     └─ extract  optional. Pluggable readers turn a page into structured data
 ```
 
 | Endpoint | Does |
 |---|---|
-| `POST /search` | search; optionally scrape and extract every result in the same call |
+| `POST /search` | search; optionally scrape every result in the same call |
 | `POST /scrape` | one URL → markdown / links / html |
 | `POST /map` | enumerate a domain from its sitemap |
-| `POST /resolve` | search + scrape + extract + pick the best answer, in one call |
 | `GET /health` | identity pool, browsers, cache |
 
 `/search`, `/scrape` and `/map` mirror the request and response shapes of a
@@ -104,43 +102,11 @@ country. `scripts/proxy_trial.py` measures a provider before you commit, and
 reports cold-profile blocks separately from exit quality — charging a first-use
 block to the provider is how you reject a perfectly good exit.
 
-## Extraction is pluggable
-
-The engine returns markdown. Turning a page into *structured* data is a plugin, and
-this repo ships nutrition panels as the worked example: readers for several
-retailer and composition-table layouts, a generic reader for any page printing a
-table, and a schema.org `NutritionInformation` reader.
-
-A reader is a pure function over `(html, markdown, url)` — no network, no clock —
-so every one is tested against a saved page in CI. Adding a site is one file, one
-fixture, one test. Most sites need no reader at all.
-
-**There is no model in the read path.** The hosted extractor this replaced invented
-data: a complete macro panel for a page that printed none, a protein figure lifted
-out of a meta description, another lifted out of a product title. A guessed value
-is worse than no value, because nothing downstream can tell the difference. Here a
-page with no readable table returns `no_panel`, and the miss list names exactly
-which reader to write next.
-
-Guards that exist because real pages broke them:
-
-- Absent value is `null`, **never `0`**. A literally printed `0.0` is the one case
-  where zero is faithful.
-- Basis is read off the page, never assumed. Per-serving is converted only when the
-  serving weight is actually printed.
-- Units are converted using the page's own unit column — `912.75 mg` of saturated
-  fat is 0.9 g, not 912 g.
-- A table listing both per-100g and per-serving rows must not let the second
-  silently overwrite the first.
-- Physically impossible values are dropped and named: no macro above 100 g/100 g,
-  no energy above 900 kcal/100 g. One source had duplicated its polyunsaturated-fat
-  figure into its cholesterol row.
 
 ## Nothing about one market is baked in
 
-Results open in the **search engine's own order** — it already ranked them, and
-overriding that with a hand-written preference list is an opinion an engine should
-not hold. Everything market-specific is config:
+Results come back in the **search engine's own order** — it already ranked them.
+Everything else is per-domain config:
 
 | Concern | Where |
 |---|---|
@@ -152,7 +118,6 @@ not hold. Everything market-specific is config:
 
 The shipped `domains.yaml` names exactly one domain, and only because search
 engines need slower pacing than content sites.
-`config/domains.india.example.yaml` shows what a market overlay looks like.
 
 ## Run it
 
@@ -196,11 +161,12 @@ proxies; a short cooldown with few identities is what burns exits.
 Deployment, sizing and the proxy decision: [`deploy/README.md`](deploy/README.md).
 
 ```bash
-python -m pytest      # 104 tests, no network and no browser
+python -m pytest      # no network, no browser
 ```
 
-Readers run against saved pages, the identity pool runs on a fake clock, and every
-bug that once corrupted a value has a regression test.
+The identity pool runs on a fake clock, the rate governor on a fake sleep, and
+coalescing and admission control on fake work — so the suite is deterministic and
+fast.
 
 ## Honest limits
 
@@ -211,7 +177,8 @@ bug that once corrupted a value has a regression test.
   crawl farm.
 - ~8% of searches are blocked and retried on another identity. That is the normal
   operating point, not a bug to chase to zero.
-- Pages whose data exists only inside an image are refused, not guessed at. Vision
-  is not implemented.
+- It returns pages, not answers. Turning a page into structured data is your
+  code's job — `/search` with `scrape: ["markdown"]` gives you clean text to work
+  from.
 
 MIT licensed. See [LICENSE](LICENSE) for fixture provenance and usage notes.

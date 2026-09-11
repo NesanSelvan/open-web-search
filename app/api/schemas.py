@@ -22,7 +22,7 @@ class SearchRequest(BaseModel):
     q: str = Field(
         min_length=1,
         validation_alias=AliasChoices("q", "query", "food_name", "name"),
-        description="Food name, or a full query when raw=true",
+        description="What to search for. Sent verbatim when raw=true.",
     )
     limit: int = Field(default=10, ge=1, le=20)
     site: str | None = Field(default=None, description="Restrict to one domain, e.g. swiggy.com")

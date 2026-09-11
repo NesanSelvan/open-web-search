@@ -51,8 +51,8 @@ def _scrape_pool(settings: Settings) -> IdentityPool:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             "# Auto-created. Identities for PAGE FETCHING, separate from search.\n"
-            "# Add a residential exit for the quick-commerce domains (needs_residential\n"
-            "# in domains.yaml) so Swiggy resolves to the store WE choose.\n"
+            "# Add a residential exit for any domain marked needs_residential, so the\n"
+            "# site serves the location WE choose rather than the datacentre's.\n"
             "scrape1||IN\n"
         )
         log.warning("created default scrape identity file at %s", path)
@@ -120,7 +120,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="open-web-search",
     version="0.1.0",
-    summary="Self-hosted web search + scrape for food nutrition data.",
+    summary="Self-hosted web search and scrape.",
     lifespan=lifespan,
 )
 app.include_router(router)

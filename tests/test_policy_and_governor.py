@@ -14,7 +14,7 @@ class TestRegistrableDomain:
 
     def test_handles_second_level_suffix(self):
         # fatsecret.co.in must not collapse to co.in.
-        assert registrable_domain("https://www.fatsecret.co.in/calories-nutrition") == "fatsecret.co.in"
+        assert registrable_domain("https://www.example.co.in/a/b") == "example.co.in"
 
     def test_handles_deep_subdomains(self):
         assert registrable_domain("https://cdn.assets.zeptonow.com/x") == "zeptonow.com"
@@ -41,7 +41,7 @@ class TestPolicyBook:
 
 
     def test_unknown_domain_falls_back_to_polite_defaults(self):
-        policy = self.book.for_url("https://some-random-food-blog.example/post")
+        policy = self.book.for_url("https://some-random-blog.example/post")
         assert policy.rate_per_min == 6
         assert policy.respect_robots is True
         assert policy.needs_browser is False

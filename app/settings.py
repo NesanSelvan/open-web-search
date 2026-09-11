@@ -42,23 +42,23 @@ class Settings(BaseSettings):
 
     # --- locale / market -----------------------------------------------------
     # Defaults are deliberately neutral. A deployment targeting one market sets
-    # these; the engine has no opinion about which country's food you are indexing.
+    # these; the engine has no opinion about which market you are searching.
     locale: str = "en-US"
     timezone: str = "UTC"
     accept_language: str = "en-US,en;q=0.9"
     default_country: str = "US"
 
     # Appended to every bare query. Empty by default: a search engine searches what
-    # you typed. Set it to steer a whole deployment at one corpus — e.g.
-    # "nutrition per 100g" biases results toward composition pages rather than
-    # recipes — or send `raw: true` per request to bypass query building.
+    # you typed. Set it to steer a whole deployment at one corpus (e.g. a site: or
+    # filetype: hint, or a recurring qualifier), or send `raw: true` per request to
+    # bypass query building entirely.
     query_suffix: str = ""
 
     # search
     search_max_retries: int = 3
     search_results: int = 10
-    # A repeated query must not spend an identity. Nutrition pages for a given food
-    # do not churn hour to hour, so this can be generous.
+    # A repeated query must not spend an identity. Results for a given query rarely
+    # churn hour to hour, so this can be generous.
     serp_cache_ttl_s: int = 6 * 3600
     # Pause on the results page before reading it. Jitter matters more than length.
     dwell_min_s: float = 0.15
@@ -78,9 +78,9 @@ class Settings(BaseSettings):
     # scrape
     # A separate identity pool, deliberately. Search identities must not be spent
     # on scraping: two Chrome instances cannot share one profile directory, and
-    # queueing page fetches behind Google's 30s cooldown makes a resolve take two
-    # minutes instead of eight seconds. Retail domains also need nothing like
-    # Google's pacing — the per-domain governor does that work instead.
+    # queueing page fetches behind the search engine's 30s cooldown makes a request
+    # take two minutes instead of eight seconds. Content sites need nothing like that
+    # pacing — the per-domain governor does that work instead.
     scrape_identities_file: Path = Path("config/identities.scrape.txt")
     scrape_cooldown_min_s: float = 0.5
     scrape_cooldown_max_s: float = 2.0

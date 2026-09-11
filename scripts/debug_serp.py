@@ -32,7 +32,7 @@ async def main() -> None:
     pool = IdentityPool.from_file(settings)
     ident = await pool.acquire()
 
-    query = "amul masti dahi nutrition per 100g"
+    query = "webassembly component model"
     url = "https://www.google.com/search?" + urllib.parse.urlencode(
         {"q": query, "num": "15", "hl": "en", "gl": "in"}
     )

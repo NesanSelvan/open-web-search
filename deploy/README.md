@@ -100,9 +100,9 @@ reach it from your backend over a private network or an SSH tunnel, never by
 opening 8080 to the internet. Every route requires `X-Internal-Token`, but that is
 a second lock, not the first one.
 
-## Known state at first deploy
+## What it returns
 
-`/search` and `/scrape` work. `extract: true` and `/resolve` return `no_panel` on
-most sites — the adapters were written against assumed markup and have not yet been
-rebuilt from captured pages. That is the next work item, and it is what stands
-between this service and actually replacing Firecrawl for nutrition data.
+Pages, not answers. `/search` gives ranked results and, with
+`scrape: ["markdown"]`, each page's content as clean text. Turning that into
+structured data is your code's job — the engine deliberately holds no opinion about
+what you are extracting.

@@ -76,7 +76,6 @@ async def _search(req: SearchRequest, request: Request) -> SearchResponse:
 
     `scrape: []`               -> URLs only, ~3s.
     `scrape: ["markdown"]`     -> each result's page content too.
-    `extract: true`            -> also run the nutrition reader on each page.
     """
     svc = request.app.state.services
     settings = get_settings()

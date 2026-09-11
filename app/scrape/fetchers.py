@@ -1,9 +1,9 @@
 """Two fetch tracks.
 
-Track A (static) is a plain HTTP GET and returns in ~300ms — most nutrition pages
-are server-rendered and this is all they need. Track B (browser) exists for pages
-that render their panel in JavaScript, and for the Indian retailers where the exit
-IP and the geolocation decide *which catalogue you are even shown*.
+Track A (static) is a plain HTTP GET and returns in ~300ms — most pages are
+server-rendered and this is all they need. Track B (browser) exists for pages that
+render in JavaScript, and for sites where the exit IP and the geolocation decide
+*what you are even shown*.
 """
 
 from __future__ import annotations
@@ -83,8 +83,8 @@ async def fetch_browser(
     """Render with a real browser, through this identity's exit.
 
     `geo` is the whole point for quick-commerce: Swiggy serves a different catalogue
-    per location and *strips the nutrition table entirely* for SKUs sold out at the
-    resolved store. Setting it ourselves is what a hosted vendor cannot give us.
+    per location, and some hide content entirely for items unavailable there.
+    Setting it ourselves is what a hosted vendor cannot give us.
     """
     geo = geo_override or policy.geo
 

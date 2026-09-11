@@ -1,14 +1,15 @@
 """Scrape orchestration: cache -> governor -> static track -> browser track.
 
-The escalation rule is deliberately cheap-first. A plain GET answers most nutrition
-pages in ~300ms; we only pay for a browser when the static response cannot be read,
-or when the domain's policy says the panel is behind JavaScript.
+The escalation rule is deliberately cheap-first. A plain GET answers most pages in
+~300ms; we only pay for a browser when the static response carries too little text
+to be useful, or when the domain's policy says the content is behind JavaScript.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 
 from app.domain.models import Page
@@ -21,14 +22,26 @@ from app.settings import Settings
 
 log = logging.getLogger(__name__)
 
-# If a static response contains none of these, the panel almost certainly rendered
-# client-side and the page is worth a browser.
-_PANEL_HINTS = ("nutrition", "nutritional information", "energy", "protein", "per 100")
+# A static response is "readable" when it carries enough real text to be worth
+# keeping. Below this, the page almost certainly rendered client-side and a browser
+# will do better.
+#
+# This used to test for domain-specific keywords, which meant any page about
+# anything else failed the check and was escalated to a browser for no reason. The
+# engine must not assume what it is reading about.
+_MIN_TEXT_CHARS = 500
+
+_TAG_RE = re.compile(r"<(script|style|noscript)\b.*?</\1>", re.S | re.I)
+_STRIP_RE = re.compile(r"<[^>]+>")
 
 
 def _looks_readable(html: str) -> bool:
-    low = html[:200_000].lower()
-    return any(hint in low for hint in _PANEL_HINTS)
+    """Does this response carry substantive text, independent of subject?"""
+    if not html:
+        return False
+    body = _TAG_RE.sub(" ", html[:400_000])
+    text = _STRIP_RE.sub(" ", body)
+    return len(" ".join(text.split())) >= _MIN_TEXT_CHARS
 
 
 class Scraper:
@@ -45,7 +58,7 @@ class Scraper:
 
         Two Chrome instances cannot share one profile directory, and borrowing a
         search identity puts every page fetch behind Google's 30s cooldown — which
-        is what turned an 8-second resolve into a 120-second one.
+        is what turned an 8-second request into a 120-second one.
         """
         self._policies = policies
         self._gov = governor
@@ -125,8 +138,8 @@ class Scraper:
         serialised, and threw away the concurrency a shared Chrome already offers.
 
         Geo is the point for quick-commerce: those sites serve a different
-        catalogue per location and strip the nutrition table for items sold out at
-        the resolved store. We choose the store; a hosted vendor chooses for you.
+        catalogue per location, and some hide content entirely for items not
+        available there. We choose the location; a hosted vendor chooses for you.
         """
         try:
             ident = self._pool.pick_shared()
@@ -147,8 +160,8 @@ class Scraper:
         """Fetch in parallel under a hard deadline. One dead URL is not fatal.
 
         Without the deadline a single slow site sets the whole response time — a
-        resolve was measured at 48s because one page took its own sweet time while
-        three others had long since finished.
+        a request was measured at 48s because one page took its own sweet time
+        while three others had long since finished.
         """
         tasks = [asyncio.create_task(self.fetch(u, geo=geo)) for u in urls]
         timeout = (deadline_ms / 1000) if deadline_ms else None

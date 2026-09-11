@@ -2,7 +2,7 @@
 #
 # Two Chrome instances cannot share a profile directory, and borrowing a search
 # identity puts every page fetch behind the search engine's cooldown. That is what
-# once turned an 8-second resolve into a 120-second one.
+# once turned an 8-second request into a 120-second one.
 #
 # Page fetching needs no cooldown of its own: per-domain pacing is the governor's
 # job (config/domains.yaml). So these can be few, and a plain datacenter IP is

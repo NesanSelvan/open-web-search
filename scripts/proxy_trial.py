@@ -25,18 +25,19 @@ from app.search.google import Blocked, ExtractionFailed, _search_once
 from app.search.identity import IdentityPool, Outcome, PoolExhausted
 from app.settings import Settings
 
-# Real food queries, not "test" — a synthetic query pattern is its own signal.
+# Ordinary queries, not "test" — a synthetic pattern is its own detection signal.
+# Swap these for queries typical of YOUR traffic before trusting the block rate.
 QUERIES = [
-    "amul masti dahi nutrition per 100g",
-    "yogabar protein bar nutrition per 100g",
-    "nutrabay whey protein nutrition per 100g",
-    "britannia marie gold nutrition per 100g",
-    "mother dairy paneer nutrition per 100g",
-    "haldiram aloo bhujia nutrition per 100g",
-    "epigamia greek yogurt nutrition per 100g",
-    "quaker oats india nutrition per 100g",
-    "saffola gold oil nutrition per 100g",
-    "kissan mixed fruit jam nutrition per 100g",
+    "postgres index bloat",
+    "rust async runtime comparison",
+    "kubernetes pod eviction reasons",
+    "webassembly component model",
+    "sqlite wal mode concurrency",
+    "tls session resumption explained",
+    "python asyncio task cancellation",
+    "nginx reverse proxy timeouts",
+    "docker layer caching tips",
+    "grafana alerting best practices",
 ]
 
 

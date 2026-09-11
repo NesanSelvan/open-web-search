@@ -16,10 +16,10 @@ def to_markdown(html: str, url: str = "") -> str:
         html,
         url=url or None,
         output_format="markdown",
-        include_tables=True,      # the nutrition panel IS a table — never drop it
+        include_tables=True,      # tables often carry the actual content — never drop them
         include_links=False,
         include_comments=False,
-        favor_recall=True,        # a stray nav line costs nothing; a lost panel costs everything
+        favor_recall=True,        # a stray nav line costs nothing; lost content costs everything
     )
     if text:
         return text

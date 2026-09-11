@@ -105,21 +105,21 @@ class SearchUnavailable(RuntimeError):
 
 
 def build_query(
-    food_name: str,
+    query: str,
     brand: str | None = None,
     site: str | None = None,
-    suffix: str = "nutrition per 100g",
+    suffix: str = "",
 ) -> str:
-    """`<brand> <food> <suffix>`, optionally pinned to one domain.
+    """`<brand> <query> <suffix>`, optionally pinned to one domain.
 
-    The suffix is what makes a search return composition pages rather than recipes.
-    It is configurable (`WS_QUERY_SUFFIX`) because it encodes what this deployment
-    is looking for, and `raw: true` bypasses query building entirely.
+    Suffix is EMPTY by default: a search engine searches what you typed. A
+    deployment aimed at one corpus can set `WS_QUERY_SUFFIX` to steer every query,
+    and `raw: true` bypasses query building entirely.
 
-    The `site:` form trades recall for precision — the right default when you
-    already know which retailer carries the item.
+    The `site:` form trades recall for precision, for when you already know which
+    domain holds the answer.
     """
-    parts = [p for p in (brand, food_name) if p]
+    parts = [p for p in (brand, query) if p]
     q = " ".join(parts).strip()
     if suffix:
         q = f"{q} {suffix}".strip()
