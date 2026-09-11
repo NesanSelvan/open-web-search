@@ -20,7 +20,7 @@ from app.api.schemas import (
     SearchResponse,
 )
 from app.concurrency import Overloaded
-from app.scrape.clean import to_markdown
+from app.scrape.clean import page_title, to_markdown
 from app.search.google import SearchUnavailable, build_query
 from app.settings import get_settings
 
@@ -160,6 +160,7 @@ async def _search(req: SearchRequest, request: Request) -> SearchResponse:
 
         hit.status = page.status
         hit.track = page.track
+        hit.page_title = page_title(page.html)
         hit.final_url = page.final_url
         if "markdown" in formats:
             hit.markdown = to_markdown(page.html, page.final_url or page.url)
@@ -189,7 +190,11 @@ async def _scrape(req: ScrapeRequest, request: Request) -> ScrapeResponse:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"fetch failed: {exc}") from exc
 
     out = ScrapeResponse(
-        url=page.url, final_url=page.final_url, status=page.status, track=page.track
+        url=page.url,
+        final_url=page.final_url,
+        status=page.status,
+        track=page.track,
+        title=page_title(page.html),
     )
     if "markdown" in req.formats:
         out.markdown = to_markdown(page.html, page.final_url or page.url)

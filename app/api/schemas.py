@@ -54,6 +54,7 @@ class SearchHit(BaseModel):
     rank: int = 0
 
     # Present only when the request asked to scrape.
+    page_title: str | None = None
     status: int | None = None
     track: str | None = None          # static | browser | cache
     final_url: str | None = None
@@ -86,6 +87,7 @@ class ScrapeResponse(BaseModel):
     final_url: str | None = None
     status: int
     track: str
+    title: str | None = None
     markdown: str | None = None
     links: list[str] | None = None
     html: str | None = None
