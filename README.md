@@ -26,7 +26,7 @@
 
 ## Contents
 
-| | |
+| Section | What is there |
 |---|---|
 | [Quickstart](#quickstart) | up and answering in four commands |
 | [One real request](#one-real-request) | the call in the picture, and its full response |
@@ -80,7 +80,12 @@ The call in the picture, ready to paste:
 curl -sS -X POST localhost:8080/search \
   -H "X-API-Key: $WS_API_KEY" \
   -H 'Content-Type: application/json' \
-  -d '{"query": "Skyr Yogurt nutrition per 100g", "limit": 1, "scrape": ["markdown"], "scrape_deadline_ms": 8000}' | jq .
+  -d '{
+    "query": "Skyr Yogurt nutrition per 100g",
+    "limit": 1,
+    "scrape": ["markdown"],
+    "scrape_deadline_ms": 8000
+  }' | jq .
 ```
 
 <details>
@@ -301,8 +306,8 @@ One URL → its content.
 }
 ```
 
-`track` tells you what it cost. `static` is a plain HTTP fetch (~300 ms). `browser`
-means the static fetch came back unreadable and a real Chrome rendered it (~3 s).
+`track` tells you what it cost. `static` is a plain HTTP fetch (\~300 ms). `browser`
+means the static fetch came back unreadable and a real Chrome rendered it (\~3 s).
 `cache` means neither happened.
 
 <br>
@@ -369,7 +374,7 @@ No authentication. Safe to point a monitor at.
 
 <br>
 
-**What to watch:** `block_rate` and `quarantined`. Sustained blocks above ~15% is
+**What to watch:** `block_rate` and `quarantined`. Sustained blocks above \~15% is
 the signal to add residential exits. A steadily rising `queued` means you need more
 identities, not more code.
 
@@ -412,20 +417,20 @@ POST /search
                             bounded by scrape_deadline_ms
 ```
 
-Steps ① and ⑤ never touch an identity. That is why a repeated query costs ~60 ms and
+Steps ① and ⑤ never touch an identity. That is why a repeated query costs \~60 ms and
 spends nothing.
 
 ### Speed
 
-| | |
+| Case | Time |
 |---|---|
-| Search, new query | **~1.2 s** warm (0.7–2.3 s measured): engine time to first byte, results landing in the DOM, a jittered dwell |
-| Search, repeated | **~30 ms** |
+| Search, new query | **\~1.2 s** warm (0.7–2.3 s measured): engine time to first byte, results landing in the DOM, a jittered dwell |
+| Search, repeated | **\~30 ms** |
 | Search + scrape | search + at most `scrape_deadline_ms` (1.2 s default) |
-| First search after idle | +~1.3 s for a Chrome relaunch; `WS_CONTEXT_IDLE_TTL_S` sets how often that happens |
+| First search after idle | +\~1.3 s for a Chrome relaunch; `WS_CONTEXT_IDLE_TTL_S` sets how often that happens |
 
 Throughput is `identities ÷ cooldown`. Each warm identity holds a live Chrome, so
-budget ~1 GB of RAM per identity and set `WS_MAX_OPEN_CONTEXTS` to match. More
+budget \~1 GB of RAM per identity and set `WS_MAX_OPEN_CONTEXTS` to match. More
 identities than the browser cap makes every other request evict and relaunch a
 browser, which is exactly the cost the pool exists to avoid.
 
@@ -444,7 +449,7 @@ of signal disappears.
 
 Measured on a plain datacenter VPS, no proxy:
 
-| | blocked |
+| Client | Blocked |
 |---|---|
 | plain `curl` | 7% |
 | headless Chrome | **100%** |
@@ -479,10 +484,10 @@ Chrome instances cannot share a profile directory, and page fetches queued behin
 the search cooldown turn an 8-second request into a two-minute one. Content sites
 are paced per-domain by the rate governor instead.
 
-**Proxies are optional.** A plain datacenter IP held at ~8% blocked in testing. Add
+**Proxies are optional.** A plain datacenter IP held at \~8% blocked in testing. Add
 residential exits when the evidence says to:
 
-- a steady block rate above ~15%,
+- a steady block rate above \~15%,
 - volume high enough that one IP looks unusual,
 - a site that serves different content per country.
 
@@ -518,8 +523,8 @@ All are prefixed `WS_`; see [`.env.example`](.env.example) for the full set.
 | `WS_API_KEY` | *(empty)* | The one key, sent as `X-API-Key`. Refuses to start without it |
 | `WS_COOLDOWN_MIN_S` / `_MAX_S` | `20` / `45` | Per-identity cooldown, jittered |
 | `WS_MAX_OPEN_CONTEXTS` | `2` | Live Chromes. **≥ identity count** |
-| `WS_MAX_TABS_PER_CONTEXT` | `6` | Tabs are the cheap axis: ~55 ms vs ~1330 ms |
-| `WS_CONTEXT_IDLE_TTL_S` | `120` | Reap an idle Chrome after this. Relaunch costs ~1.3 s on the next search; idle Chrome costs ~150 MB |
+| `WS_MAX_TABS_PER_CONTEXT` | `6` | Tabs are the cheap axis: \~55 ms vs \~1330 ms |
+| `WS_CONTEXT_IDLE_TTL_S` | `120` | Reap an idle Chrome after this. Relaunch costs \~1.3 s on the next search; idle Chrome costs \~150 MB |
 | `WS_SERP_CACHE_TTL_S` | `21600` | 6 h. A repeated query must not spend an identity |
 | `WS_MAX_IN_FLIGHT` / `WS_MAX_QUEUED` | `8` / `32` | Past both, callers get `503` + `Retry-After` |
 | `WS_QUERY_SUFFIX` | *(empty)* | Appended to every non-`raw` query |
@@ -601,7 +606,7 @@ set -a && . ./.env && set +a
   yours. You are responsible for how you operate it.
 - Sustained throughput needs identities, and identities need RAM. One box is not a
   crawl farm.
-- ~8% of searches are blocked and retried on another identity. That is the normal
+- \~8% of searches are blocked and retried on another identity. That is the normal
   operating point, not a bug to chase to zero.
 - It returns pages, not answers. Turning a page into structured data is your
   code's job. `/search` with `scrape: ["markdown"]` gives you clean text to work
