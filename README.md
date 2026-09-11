@@ -27,6 +27,7 @@ Ranked results, each page's content as clean markdown.
 | | |
 |---|---|
 | [Quickstart](#quickstart) | up and answering in four commands |
+| [One real request](#one-real-request) | the whole response, nothing elided |
 | [API reference](#api-reference) | **every request and response field** |
 | [Errors](#errors) | status codes and what to do about them |
 | [How it works](#how-it-works) | the pipeline one request walks |
@@ -66,6 +67,35 @@ is a search engine whose identities get burned on someone else's traffic.
 There is deliberately nothing more: no per-caller keys, no rate tiers, no token
 formats to choose between. Throughput is `identities ÷ cooldown`, so clients that
 must not be able to starve each other get their own deployment, not their own key.
+
+---
+
+## One real request
+
+A live call and its complete response — every field, nothing elided.
+
+<p align="center">
+  <img src="docs/demo.png" alt="A single /search call returning ranked results and the page as markdown" width="900">
+</p>
+
+```bash
+curl -sS -X POST localhost:8080/search \
+  -H "X-API-Key: $WS_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"Skyr Yogurt","limit":1,"scrape":["markdown"],"scrape_deadline_ms":8000}' | jq .
+```
+
+**This is a warm run.** `serp_cache_hit: true` and `track: "cache"` mean neither an
+identity nor a fetch was spent — hence `189ms`. The first, cold call of the same
+query took **9294ms** and came back `track: "browser"`: a JS storefront whose static
+fetch was unreadable, so real Chrome rendered it. That page also needs
+`scrape_deadline_ms: 8000`; at the `1200` default it returns `track: "timeout"` with
+null content, which is the deadline working as designed.
+
+**The markdown is the page, not a summary.** The tail — `add_shopping_cartAdd`,
+`Categories`, `Starting the store is taking longer than expected.` — is storefront
+chrome that was in the DOM when Chrome snapshotted it. Nothing interprets the page
+on the way out; turning that into fields is your code's job.
 
 ---
 
@@ -293,12 +323,11 @@ Every error is `{"detail": "..."}` with a meaningful status.
 | Status | Meaning | What the caller should do |
 |---|---|---|
 | `401` | Missing or unrecognised API key | Fix the key. Not retryable |
-| `429` | Your key's rate limit or daily quota | Back off for `Retry-After` seconds |
 | `502` | The page could not be fetched (`/scrape`) | Usually the target site. Retry once |
 | `503` | Overloaded — in-flight and queue are both full | Back off for `Retry-After` seconds |
 | `503` | Search unavailable — no identity could get through | Retry with backoff; check `/health` |
 
-Both `429` and `503` carry a **`Retry-After`** header. A refusal you can act on
+Both `503` forms carry a **`Retry-After`** header. A refusal you can act on
 immediately beats a 90-second wait that ends in a timeout.
 
 ---
