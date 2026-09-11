@@ -6,6 +6,8 @@ venv/
 # ALL identity files: they hold `id|http://user:pass@proxy|country` lines.
 # The narrow `identities.txt` rule missed identities.scrape.txt, which the
 # service auto-creates on first boot — so it got committed.
+# Real API keys, like identities, never go in git.
+config/api_keys.txt
 config/identities*.txt
 !config/identities*.example.txt
 profiles/
@@ -14,3 +16,8 @@ profiles/
 *.db-wal
 *.db-shm
 .pytest_cache/
+# DevCLI's own workspace — it carries its own git repo and its own history.
+# Nesting it here makes git treat it as an uninitialised submodule
+# ("does not have a commit checked out"), and its prompt store is not this
+# project's source anyway.
+.devcli/
