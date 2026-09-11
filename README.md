@@ -156,12 +156,42 @@ engines need slower pacing than content sites.
 
 ## Run it
 
+### Docker — installs Chrome for you
+
 ```bash
 cp .env.example .env                                   # set WS_INTERNAL_TOKEN
 cp config/identities.example.txt config/identities.txt
 docker compose up -d --build
 curl -s localhost:8080/health | jq
 ```
+
+### Locally — needs real Google Chrome installed
+
+Chromium will not do: `channel="chrome"` is deliberate, because the bundled build
+carries its own automation tells. On macOS there is a real display, so Chrome
+windows genuinely open — that is the design, not a bug.
+
+```bash
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt     # ./venv/bin/pip, not a bare `pip`
+
+cp config/identities.example.txt config/identities.txt
+cat > .env <<'EOF'
+WS_INTERNAL_TOKEN=local-dev-token
+WS_PROFILE_ROOT=./profiles
+WS_DB_PATH=./cache.db
+WS_COOLDOWN_MIN_S=5
+WS_COOLDOWN_MAX_S=12
+EOF
+
+./venv/bin/python main.py          # or: python -m app.main
+```
+
+`.env.example` points the profile and cache paths at `/var/lib/open-web-search`,
+which is right for the container and wrong for a laptop — the block above
+overrides both. The shortened cooldown is dev-only: the 20–45s production default
+makes back-to-back testing feel like it has hung. Raise it before pointing at real
+proxies; a short cooldown with few identities is what burns exits.
 
 Deployment, sizing and the proxy decision: [`deploy/README.md`](deploy/README.md).
 
