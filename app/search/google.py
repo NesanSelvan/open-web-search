@@ -38,8 +38,11 @@ _SEARCH_URL = "https://www.google.com/search"
 # results. We keep the wrapper and resolve it afterwards (one 302 per result), and
 # drop only genuine Google-internal links — AI Mode, nav, tools.
 #
-# `cite` is the visible host line. When it is present but not a URL ("20+ likes ·
-# 9 months ago") the unit is a social/video card, not an organic result.
+# `cite` is the visible source line. It used to be a URL for organic results, so
+# a non-URL cite ("20+ likes · 9 months ago") marked a social/video card and was
+# skipped. Google now prints "70+ comments · 1 year ago" under ordinary forum
+# results too, and that rule dropped every result on a reddit-heavy page — zero
+# extracted, three burnt attempts, a 503. The cite is returned, never filtered on.
 _EXTRACT_JS = """
 () => {
   const out = [];
@@ -60,7 +63,6 @@ _EXTRACT_JS = """
     const card = a.closest('div[data-hveid]') || a.parentElement;
     const citeEl = card ? card.querySelector('cite') : null;
     const cite = citeEl ? citeEl.innerText.trim() : '';
-    if (cite && !/^https?:\\/\\//i.test(cite)) continue;
 
     const snippetEl = card ? card.querySelector('div[data-sncf], div[role="text"], .VwiC3b') : null;
     seen.add(href);
