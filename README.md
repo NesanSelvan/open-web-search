@@ -1,4 +1,4 @@
-<h1 align="center">open-web-search</h1>
+<h1 align="center">Open Web Search</h1>
 
 <p align="center">
   <b>Self-hosted web search and scrape.</b><br>
