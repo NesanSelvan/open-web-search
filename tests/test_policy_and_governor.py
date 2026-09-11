@@ -6,7 +6,6 @@ from app.scrape.governor import DomainGovernor
 from app.scrape.policy import PolicyBook, registrable_domain
 
 CONFIG = Path(__file__).resolve().parents[1] / "config" / "domains.yaml"
-INDIA = Path(__file__).resolve().parents[1] / "config" / "domains.india.example.yaml"
 
 
 class TestRegistrableDomain:
@@ -36,17 +35,10 @@ class TestPolicyBook:
         assert google.rate_per_min < swiggy.rate_per_min
 
     def test_default_config_holds_no_market_opinions(self):
-        """The shipped config must be generic. Anyone can run this service against
-        any corpus; baking one country's retailers into the default makes it a
-        single-purpose tool wearing a general one's clothes."""
+        """The shipped config must stay generic — one entry, and only because
+        search engines need slower pacing than content sites."""
         assert set(self.book._domains) <= {"google.com"}
-        assert self.book._image_only == set()
 
-    def test_results_use_the_search_engine_order_by_default(self):
-        # No domain carries a `rank`, so nothing overrides how the engine ranked
-        # its own results.
-        for domain in self.book._domains:
-            assert self.book.for_url(f"https://{domain}/x").rank is None
 
     def test_unknown_domain_falls_back_to_polite_defaults(self):
         policy = self.book.for_url("https://some-random-food-blog.example/post")
@@ -54,43 +46,6 @@ class TestPolicyBook:
         assert policy.respect_robots is True
         assert policy.needs_browser is False
 
-    def test_unknown_domain_is_untrusted_not_untrustworthy(self):
-        # "unknown" simply means nobody vouched for it -> tier d, never a refusal.
-        policy = self.book.for_url("https://some-food-blog.example/post")
-        assert policy.trust == "unknown"
-        assert policy.tier == "d"
-
-
-class TestMarketOverlay:
-    """The India overlay is what a deployment's OPINIONS look like — loaded only if
-    you point WS_DOMAINS_FILE at it."""
-
-    def setup_method(self):
-        self.book = PolicyBook.load(INDIA)
-
-    def test_quick_commerce_carries_geo_and_residential(self):
-        policy = self.book.for_url("https://www.swiggy.com/instamart/p/1")
-        assert policy.needs_residential
-        assert policy.geo is not None
-
-    def test_swiggy_ttl_is_short_because_sold_out_strips_the_panel(self):
-        policy = self.book.for_url("https://www.swiggy.com/instamart/p/1")
-        assert policy.cache_ttl_s <= 3600
-
-    def test_image_only_domains_are_flagged(self):
-        assert self.book.for_url("https://blinkit.com/prn/x").image_only_panel
-        assert not self.book.for_url("https://nutrabay.com/product/x").image_only_panel
-
-    def test_trust_maps_to_tier(self):
-        assert self.book.for_url("https://anuvaad.org.in/x").tier == "a"      # lab
-        assert self.book.for_url("https://nutrabay.com/x").tier == "b"        # brand
-        assert self.book.for_url("https://bigbasket.com/x").tier == "c"       # retailer
-        assert self.book.for_url("https://fatsecret.co.in/x").tier == "d"     # aggregate
-
-    def test_a_retailer_label_outranks_an_aggregate(self):
-        # The whole point of trust: provenance decides, not markup convenience.
-        assert self.book.for_url("https://bigbasket.com/x").tier < \
-               self.book.for_url("https://fatsecret.co.in/x").tier
 
 
 class TestGovernor:
@@ -179,54 +134,3 @@ class TestStaticFetchHeaders:
         assert _headers(None)["Accept-Language"].startswith("en-US")
 
 
-class TestTrustOverridesAdapterTier:
-    """Tier is a judgement about a SOURCE, so the deployment's config wins over
-    whatever an adapter defaulted to. An adapter only knows how it parsed a page,
-    not whether anyone vouches for the site."""
-
-    async def test_config_trust_beats_the_adapter_default(self):
-        from app.domain.models import Basis, Page, Tier
-        from app.extract.registry import Reader
-        from app.scrape.policy import PolicyBook
-        from app.settings import Settings
-
-        html = (
-            "<html><body><h1>Semolina Upma</h1>"
-            "<h2>Nutritional Information</h2><table>"
-            "<tr><th>NUTRIENT</th><th>Amount</th><th>Unit</th></tr>"
-            "<tr><td>Energy</td><td>147.89</td><td>kcal</td></tr>"
-            "<tr><td>Protein</td><td>3.3</td><td>g</td></tr>"
-            "<tr><td>Carbohydrate</td><td>16.31</td><td>g</td></tr>"
-            "</table></body></html>"
-        )
-        url = "https://anuvaad.org.in/nutrition-fact/upma/"
-
-        book = PolicyBook({}, {"anuvaad.org.in": {"trust": "lab"}}, set())
-        reader = Reader(Settings(), policies=book)
-        panel = await reader.read(
-            Page(url=url, html=html, status=200), book.for_url(url)
-        )
-
-        # The generic reader defaults to tier d; the config says this is laboratory
-        # composition data, which outranks every retailer transcription.
-        assert panel.tier is Tier.A
-        assert any("domain trust" in n for n in panel.notes)
-
-    async def test_unvouched_domain_keeps_the_cautious_default(self):
-        from app.domain.models import Page, Tier
-        from app.extract.registry import Reader
-        from app.scrape.policy import PolicyBook
-        from app.settings import Settings
-
-        html = (
-            "<html><body><h1>Something</h1><h2>Nutrition</h2><table>"
-            "<tr><th>N</th><th>Amount</th><th>Unit</th></tr>"
-            "<tr><td>Energy</td><td>100</td><td>kcal</td></tr>"
-            "<tr><td>Protein</td><td>5</td><td>g</td></tr>"
-            "</table></body></html>"
-        )
-        url = "https://random-blog.example/food"
-        book = PolicyBook({}, {}, set())
-        reader = Reader(Settings(), policies=book)
-        panel = await reader.read(Page(url=url, html=html, status=200), book.for_url(url))
-        assert panel.tier is Tier.D

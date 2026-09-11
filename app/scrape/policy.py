@@ -14,16 +14,6 @@ from urllib.parse import urlsplit
 import yaml
 
 
-# How much a domain's numbers are worth, independent of how convenient they were
-# to parse. Kept as config because it is a JUDGEMENT about a source, not a fact
-# about the web — a different deployment will trust different sites.
-TRUST_TIERS = {
-    "lab": "a",         # official composition table / laboratory analysis
-    "brand": "b",       # the manufacturer transcribing its own pack label
-    "retailer": "c",    # a shop transcribing a label it stocks
-    "aggregator": "d",  # crowd or API aggregate
-    "unknown": "d",
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,14 +25,6 @@ class DomainPolicy:
     cache_ttl_s: int
     respect_robots: bool
     geo: tuple[float, float] | None = None
-    image_only_panel: bool = False
-    # Lower sorts first when choosing which results to open. None = unranked.
-    rank: int | None = None
-    trust: str = "unknown"
-
-    @property
-    def tier(self) -> str:
-        return TRUST_TIERS.get(self.trust, "d")
 
 
 def registrable_domain(url_or_host: str) -> str:
@@ -65,10 +47,9 @@ def registrable_domain(url_or_host: str) -> str:
 
 
 class PolicyBook:
-    def __init__(self, defaults: dict, domains: dict, image_only: set[str]):
+    def __init__(self, defaults: dict, domains: dict):
         self._defaults = defaults
         self._domains = domains
-        self._image_only = image_only
 
     @classmethod
     def load(cls, path: Path) -> "PolicyBook":
@@ -76,7 +57,6 @@ class PolicyBook:
         return cls(
             defaults=raw.get("defaults", {}),
             domains=raw.get("domains", {}) or {},
-            image_only=set(raw.get("image_only_panels", []) or []),
         )
 
     def for_url(self, url: str) -> DomainPolicy:
@@ -84,7 +64,6 @@ class PolicyBook:
         cfg = {**self._defaults, **(self._domains.get(domain) or {})}
         geo_cfg = cfg.get("geo")
         geo = (float(geo_cfg["lat"]), float(geo_cfg["lng"])) if geo_cfg else None
-        rank = cfg.get("rank")
         return DomainPolicy(
             domain=domain,
             rate_per_min=float(cfg.get("rate_per_min", 6)),
@@ -93,9 +72,6 @@ class PolicyBook:
             cache_ttl_s=int(cfg.get("cache_ttl_s", 86400)),
             respect_robots=bool(cfg.get("respect_robots", True)),
             geo=geo,
-            image_only_panel=domain in self._image_only,
-            rank=int(rank) if rank is not None else None,
-            trust=str(cfg.get("trust", "unknown")),
         )
 
 

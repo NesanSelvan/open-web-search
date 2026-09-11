@@ -13,8 +13,6 @@ from selectolax.parser import HTMLParser
 from app.api.schemas import (
     MapRequest,
     MapResponse,
-    ResolveRequest,
-    ResolveResponse,
     ScrapeRequest,
     ScrapeResponse,
     SearchHit,
@@ -22,8 +20,7 @@ from app.api.schemas import (
     SearchResponse,
 )
 from app.concurrency import Overloaded
-from app.domain.models import Rejection
-from app.extract.clean import to_markdown
+from app.scrape.clean import to_markdown
 from app.search.google import SearchUnavailable, build_query
 from app.settings import get_settings
 
@@ -106,7 +103,7 @@ async def _search(req: SearchRequest, request: Request) -> SearchResponse:
         SearchHit(url=r.url, title=r.title, snippet=r.snippet, rank=r.rank) for r in results
     ]
 
-    formats = req.scrape or (["markdown"] if req.extract else [])
+    formats = req.scrape
     if not formats:
         timing["total_ms"] = int((time.perf_counter() - started) * 1000)
         return SearchResponse(query=query, results=hits, timing_ms=timing)
@@ -150,7 +147,6 @@ async def _search(req: SearchRequest, request: Request) -> SearchResponse:
     timing["per_page_ms"] = {
         h.url.split("/")[2] if "/" in h.url else h.url: ms for h, (_, ms) in zip(hits, fetched)
     }
-    read_started = time.perf_counter()
 
     for hit, page in zip(hits, pages):
         if isinstance(page, TimeoutError):
@@ -173,20 +169,7 @@ async def _search(req: SearchRequest, request: Request) -> SearchResponse:
         if "html" in formats:
             hit.html = page.html
 
-        if req.extract:
-            policy = svc.policies.for_url(page.final_url or page.url)
-            try:
-                outcome = await svc.reader.read(page, policy)
-            except Exception as exc:
-                log.info("reader raised url=%s %s", hit.url, exc)
-                continue
-            if isinstance(outcome, Rejection):
-                hit.rejected = outcome.to_dict()
-            else:
-                hit.panel = outcome.to_dict()
 
-    if req.extract:
-        timing["extract_ms"] = int((time.perf_counter() - read_started) * 1000)
     timing["total_ms"] = int((time.perf_counter() - started) * 1000)
     return SearchResponse(query=query, results=hits, timing_ms=timing)
 
@@ -224,32 +207,6 @@ async def map_domain(req: MapRequest, request: Request) -> MapResponse:
     urls = await svc.scraper.map_domain(req.domain, req.search)
     return MapResponse(domain=req.domain, urls=urls[: req.limit])
 
-
-@router.post("/resolve", response_model=ResolveResponse, dependencies=[Depends(require_token)])
-async def resolve(req: ResolveRequest, request: Request) -> ResolveResponse:
-    async with _admit(request):
-        return await _resolve(req, request)
-
-
-async def _resolve(req: ResolveRequest, request: Request) -> ResolveResponse:
-    svc = request.app.state.services
-    settings = get_settings()
-    geo = (
-        (req.lat, req.lng)
-        if req.lat is not None and req.lng is not None
-        else (settings.default_geo_lat, settings.default_geo_lng)
-    )
-
-    outcome = await svc.orchestrator.resolve(
-        req.food_name,
-        brand=req.brand,
-        site=req.site,
-        geo=geo,
-        max_pages=req.max_pages,
-        use_cache=req.use_cache,
-        scrape_deadline_ms=req.scrape_deadline_ms,
-    )
-    return ResolveResponse(**outcome.to_dict())
 
 
 @router.get("/health")

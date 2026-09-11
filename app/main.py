@@ -15,8 +15,6 @@ from fastapi import FastAPI
 from app.api.routes import router
 from app.cache.store import CacheStore
 from app.concurrency import AdmissionControl
-from app.extract.registry import Reader
-from app.orchestrator import Orchestrator
 from app.scrape.governor import DomainGovernor
 from app.scrape.policy import PolicyBook
 from app.scrape.scraper import Scraper
@@ -39,8 +37,6 @@ class Services:
     cache: CacheStore
     searcher: GoogleSearcher
     scraper: Scraper
-    reader: Reader
-    orchestrator: Orchestrator
     admission: AdmissionControl
 
 
@@ -82,8 +78,6 @@ def build_services(settings: Settings) -> Services:
     scraper = Scraper(
         policies, governor, scrape_pool, settings, cache=cache, browsers=browsers
     )
-    reader = Reader(settings, policies=policies)
-    orchestrator = Orchestrator(searcher, scraper, reader, policies, cache, settings)
     admission = AdmissionControl(
         max_in_flight=settings.max_in_flight,
         max_queued=settings.max_queued,
@@ -99,8 +93,6 @@ def build_services(settings: Settings) -> Services:
         cache=cache,
         searcher=searcher,
         scraper=scraper,
-        reader=reader,
-        orchestrator=orchestrator,
         admission=admission,
     )
 

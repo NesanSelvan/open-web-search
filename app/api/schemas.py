@@ -35,10 +35,6 @@ class SearchRequest(BaseModel):
         default_factory=list,
         description="Formats to fetch for each result, e.g. [\"markdown\"]. Empty = no scrape.",
     )
-    extract: bool = Field(
-        default=False,
-        description="Also run the nutrition reader on each scraped page. Implies scrape.",
-    )
     lat: float | None = None
     lng: float | None = None
     # Hard ceiling on the scrape phase. Pages still in flight when it expires come
@@ -65,9 +61,6 @@ class SearchHit(BaseModel):
     links: list[str] | None = None
     html: str | None = None
 
-    # Present only when extract=true.
-    panel: dict | None = None
-    rejected: dict | None = None
 
 
 class SearchResponse(BaseModel):
@@ -111,29 +104,4 @@ class MapResponse(BaseModel):
     urls: list[str]
 
 
-class ResolveRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    food_name: str = Field(
-        min_length=1,
-        validation_alias=AliasChoices("food_name", "query", "q", "name"),
-    )
-    brand: str | None = None
-    user_id: str | None = Field(default=None, description="Optional, for request tracing only")
-    site: str | None = None
-    lat: float | None = None
-    lng: float | None = None
-    max_pages: int = Field(default=4, ge=1, le=8)
-    use_cache: bool = True
-    # /resolve reads more pages than /search, so it gets a wider budget — but it
-    # still needs one. Without it a single slow site set the whole response time.
-    scrape_deadline_ms: int = Field(default=4000, ge=500, le=60000)
-
-
-class ResolveResponse(BaseModel):
-    status: Literal["resolved", "not_found", "rejected"]
-    panel: dict | None = None
-    rejections: list[dict] = Field(default_factory=list)
-    considered: list[str] = Field(default_factory=list)
-    elapsed_ms: int = 0
-    from_cache: bool = False

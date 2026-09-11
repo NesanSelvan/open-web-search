@@ -3,8 +3,6 @@
   page_cache        url -> html, with a TTL WE set per domain. No vendor decides
                     our freshness, which is the other half of the Swiggy fix: a
                     stale cached copy of a stripped page is worse than no page.
-  resolution_cache  normalised food name -> panel. This is what turns a repeat
-                    lookup from ~7 seconds into ~15 milliseconds.
 
 SQLite because it is one file on the VPS, needs no second service, and handles far
 more than our write rate. The schema is deliberately portable to Postgres.
@@ -13,9 +11,7 @@ more than our write rate. The schema is deliberately portable to Postgres.
 from __future__ import annotations
 
 import json
-import re
 import time
-import unicodedata
 from pathlib import Path
 
 import aiosqlite
@@ -32,14 +28,6 @@ CREATE TABLE IF NOT EXISTS page_cache (
 );
 CREATE INDEX IF NOT EXISTS idx_page_expires ON page_cache(expires_at);
 
-CREATE TABLE IF NOT EXISTS resolution_cache (
-    key         TEXT PRIMARY KEY,
-    food_name   TEXT NOT NULL,
-    panel_json  TEXT NOT NULL,
-    resolved_at REAL NOT NULL,
-    expires_at  REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_resolution_expires ON resolution_cache(expires_at);
 
 CREATE TABLE IF NOT EXISTS serp_cache (
     key         TEXT PRIMARY KEY,
@@ -50,23 +38,8 @@ CREATE TABLE IF NOT EXISTS serp_cache (
 );
 CREATE INDEX IF NOT EXISTS idx_serp_expires ON serp_cache(expires_at);
 
-CREATE TABLE IF NOT EXISTS resolution_misses (
-    key         TEXT PRIMARY KEY,
-    food_name   TEXT NOT NULL,
-    reason      TEXT NOT NULL,
-    seen_at     REAL NOT NULL,
-    attempts    INTEGER NOT NULL DEFAULT 1
-);
 """
 
-_PUNCT_RE = re.compile(r"[^a-z0-9]+")
-
-
-def normalise_name(name: str, brand: str | None = None) -> str:
-    """Cache key. Matches the food-db normaliser's shape so keys agree with corpus keys."""
-    raw = f"{brand or ''} {name}".strip()
-    folded = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode()
-    return _PUNCT_RE.sub(" ", folded.lower()).strip()
 
 
 class CacheStore:
@@ -118,27 +91,6 @@ class CacheStore:
         )
         await self.db.commit()
 
-    # ------------------------------------------------------ resolution cache
-    async def get_resolution(self, key: str) -> dict | None:
-        cur = await self.db.execute(
-            "SELECT * FROM resolution_cache WHERE key = ? AND expires_at > ?", (key, time.time())
-        )
-        row = await cur.fetchone()
-        await cur.close()
-        if not row:
-            return None
-        return json.loads(row["panel_json"])
-
-    async def put_resolution(self, key: str, food_name: str, panel: dict, ttl_s: int) -> None:
-        now = time.time()
-        await self.db.execute(
-            "INSERT INTO resolution_cache (key, food_name, panel_json, resolved_at, expires_at) "
-            "VALUES (?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
-            "panel_json=excluded.panel_json, resolved_at=excluded.resolved_at, "
-            "expires_at=excluded.expires_at",
-            (key, food_name, json.dumps(panel), now, now + ttl_s),
-        )
-        await self.db.commit()
 
     # -------------------------------------------------------------- serp cache
     async def get_serp(self, key: str) -> list[dict] | None:
@@ -163,19 +115,10 @@ class CacheStore:
         )
         await self.db.commit()
 
-    async def record_miss(self, key: str, food_name: str, reason: str) -> None:
-        """Misses are the backlog worth working: they name the gaps in the corpus."""
-        await self.db.execute(
-            "INSERT INTO resolution_misses (key, food_name, reason, seen_at) VALUES (?,?,?,?) "
-            "ON CONFLICT(key) DO UPDATE SET attempts = attempts + 1, seen_at = excluded.seen_at, "
-            "reason = excluded.reason",
-            (key, food_name, reason, time.time()),
-        )
-        await self.db.commit()
 
     async def stats(self) -> dict:
         out: dict[str, int] = {}
-        for table in ("page_cache", "serp_cache", "resolution_cache", "resolution_misses"):
+        for table in ("page_cache", "serp_cache"):
             cur = await self.db.execute(f"SELECT COUNT(*) AS n FROM {table}")
             row = await cur.fetchone()
             await cur.close()

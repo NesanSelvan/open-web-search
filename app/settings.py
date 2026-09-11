@@ -48,10 +48,11 @@ class Settings(BaseSettings):
     accept_language: str = "en-US,en;q=0.9"
     default_country: str = "US"
 
-    # Appended to a bare food name. "nutrition per 100g" is what makes a search
-    # return composition pages instead of recipes — change it for a different
-    # domain, or send `raw: true` to bypass query building entirely.
-    query_suffix: str = "nutrition per 100g"
+    # Appended to every bare query. Empty by default: a search engine searches what
+    # you typed. Set it to steer a whole deployment at one corpus — e.g.
+    # "nutrition per 100g" biases results toward composition pages rather than
+    # recipes — or send `raw: true` per request to bypass query building.
+    query_suffix: str = ""
 
     # search
     search_max_retries: int = 3
