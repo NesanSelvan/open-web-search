@@ -69,16 +69,16 @@ ufw status verbose | head -6
 
 echo "==> config"
 cd "$APP_DIR"
-[ -f .env ] || { cp .env.example .env; echo "    WROTE .env FROM TEMPLATE — set WS_INTERNAL_TOKEN before starting"; }
+[ -f .env ] || { cp .env.example .env; echo "    WROTE .env FROM TEMPLATE — set WS_API_KEY before starting"; }
 [ -f config/identities.txt ] || { cp config/identities.example.txt config/identities.txt; \
   echo "    WROTE identities.txt FROM TEMPLATE — add residential exits before starting"; }
 
 echo
 echo "==> next, by hand (deliberately not automated):"
-echo "    1. .env            : set WS_INTERNAL_TOKEN to a real secret"
-echo "    2. identities.txt  : one line per (profile, residential exit) pair."
-echo "                         With NO proxy this box's datacenter IP gets blocked by"
-echo "                         Google within ~10 queries. Trial a provider first:"
+echo "    1. .env            : set WS_API_KEY to a real secret (openssl rand -hex 32)"
+echo "    2. identities.txt  : one line per identity. Start with NO proxy and watch"
+echo "                         block_rate on /health; add residential exits only if it"
+echo "                         climbs above ~15%. Trial a provider before buying:"
 echo "                         docker compose run --rm web-search python -m scripts.proxy_trial --queries 100"
 echo "    3. WS_MAX_OPEN_CONTEXTS must be >= identity count, or every other request"
 echo "       evicts and relaunches a browser (~1.3s)."

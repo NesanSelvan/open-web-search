@@ -13,7 +13,7 @@
 
 ```bash
 curl -X POST localhost:8080/search \
-  -H 'Authorization: Bearer YOUR_KEY' \
+  -H 'X-API-Key: YOUR_KEY' \
   -H 'Content-Type: application/json' \
   -d '{"query":"webassembly component model","limit":5,"scrape":["markdown"]}'
 ```
@@ -41,9 +41,8 @@ Ranked results, each page's content as clean markdown.
 ## Quickstart
 
 ```bash
-cp .env.example .env                                   # set WS_INTERNAL_TOKEN
+cp .env.example .env                                   # set WS_API_KEY
 cp config/identities.example.txt config/identities.txt
-cp config/api_keys.example.txt  config/api_keys.txt    # one line per caller
 docker compose up -d --build
 
 curl -s localhost:8080/health | jq
@@ -54,32 +53,19 @@ Docker installs real Google Chrome for you. For a local run without Docker, see
 
 ### Authentication
 
-Every route except `/health` needs a key. Send it any of three ways — pick one:
+One key, one header. Every route except `/health` requires it:
 
 ```http
-Authorization: Bearer YOUR_KEY
 X-API-Key: YOUR_KEY
-X-Internal-Token: YOUR_KEY
 ```
 
-Keys live one per line in `config/api_keys.txt`:
+Set it once as `WS_API_KEY` in `.env` (`openssl rand -hex 32` makes a good one).
+The service refuses to start while it is empty — a search engine anyone can call
+is a search engine whose identities get burned on someone else's traffic.
 
-```
-# name | secret | rate_per_min | daily_quota
-backend  | sk_live_9f3c…  | 60  | 10000
-notebook | sk_live_2a71…  | 6   | 500
-```
-
-Each named key carries **its own rate limit and daily quota**, and can be revoked
-without rotating anyone else's. That matters more here than in a normal API:
-throughput is `identities ÷ cooldown`, so one client looping without restraint
-doesn't just take more than its share — it empties the pool and everyone else
-queues behind it.
-
-> If `config/api_keys.txt` is empty, the service falls back to the single shared
-> `WS_INTERNAL_TOKEN`. That token has **no rate limit**. It exists so a private
-> backend on a trusted network keeps working — never expose a public service with
-> only that.
+There is deliberately nothing more: no per-caller keys, no rate tiers, no token
+formats to choose between. Throughput is `identities ÷ cooldown`, so clients that
+must not be able to starve each other get their own deployment, not their own key.
 
 ---
 
@@ -280,9 +266,6 @@ No authentication. Safe to point a monitor at.
     "open_contexts": 1, "open_tabs": 0,
     "max_tabs_per_context": 6, "max_open": 2, "idle_ttl_s": 120
   },
-  "api_keys": [
-    { "name": "backend", "rate_per_min": 60, "daily_quota": 10000, "used_today": 412, "total": 9330 }
-  ],
   "concurrency": {
     "in_flight": 0, "queued": 0, "max_in_flight": 8, "max_queued": 32,
     "peak_in_flight": 3, "admitted": 9330, "rejected": 0,
@@ -291,8 +274,6 @@ No authentication. Safe to point a monitor at.
   "cache": { "page_cache": 214, "serp_cache": 61 }
 }
 ```
-
-Secrets are never returned — `api_keys` carries names and counters only.
 
 **What to watch:** `block_rate` and `quarantined`. Sustained blocks above ~15% is
 the signal to add residential exits. A steadily rising `queued` means you need more
@@ -435,8 +416,7 @@ All are prefixed `WS_`; see [`.env.example`](.env.example) for the full set.
 
 | Var | Default | |
 |---|---|---|
-| `WS_INTERNAL_TOKEN` | `change-me` | Unlimited fallback key. Set it |
-| `WS_API_KEYS_FILE` | `config/api_keys.txt` | Named, rate-limited keys |
+| `WS_API_KEY` | *(empty)* | The one key, sent as `X-API-Key`. Refuses to start without it |
 | `WS_COOLDOWN_MIN_S` / `_MAX_S` | `20` / `45` | Per-identity cooldown, jittered |
 | `WS_MAX_OPEN_CONTEXTS` | `2` | Live Chromes. **≥ identity count** |
 | `WS_MAX_TABS_PER_CONTEXT` | `6` | Tabs are the cheap axis: ~55ms vs ~1330ms |
@@ -452,11 +432,16 @@ All are prefixed `WS_`; see [`.env.example`](.env.example) for the full set.
 ### Docker — installs Chrome for you
 
 ```bash
-cp .env.example .env                                   # set WS_INTERNAL_TOKEN
+cp .env.example .env                                   # set WS_API_KEY
 cp config/identities.example.txt config/identities.txt
 docker compose up -d --build
 curl -s localhost:8080/health | jq
 ```
+
+The container binds to loopback. To reach it from anywhere else, front it with a
+Cloudflare Tunnel or a TLS reverse proxy — see [`deploy/README.md`](deploy/README.md).
+Never open 8080 itself: the key is the only lock, and it must not cross the
+network in the clear.
 
 ### Locally — needs real Google Chrome installed
 
@@ -470,7 +455,7 @@ python3 -m venv venv
 
 cp config/identities.example.txt config/identities.txt
 cat > .env <<'EOF'
-WS_INTERNAL_TOKEN=local-dev-token
+WS_API_KEY=local-dev-key
 WS_PROFILE_ROOT=./profiles
 WS_DB_PATH=./cache.db
 WS_COOLDOWN_MIN_S=5

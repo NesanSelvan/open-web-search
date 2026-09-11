@@ -1,10 +1,11 @@
-"""HTTP surface. Internal-only — every route requires the shared token."""
+"""HTTP surface. Every route except /health requires the API key."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import logging
+import secrets
 import time
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -28,10 +29,12 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def require_token(x_internal_token: str = Header(default="")) -> None:
-    expected = get_settings().internal_token
-    if not x_internal_token or x_internal_token != expected:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing X-Internal-Token")
+async def require_api_key(x_api_key: str = Header(default="", alias="X-API-Key")) -> None:
+    """One key, one header. Constant-time compare so a wrong key costs the same
+    as a right one, and an unset key rejects everything rather than nothing."""
+    expected = get_settings().api_key
+    if not expected or not secrets.compare_digest(x_api_key.encode(), expected.encode()):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing X-API-Key")
 
 
 @contextlib.asynccontextmanager
@@ -65,7 +68,7 @@ def _extract_links(html: str) -> list[str]:
     return links
 
 
-@router.post("/search", response_model=SearchResponse, dependencies=[Depends(require_token)])
+@router.post("/search", response_model=SearchResponse, dependencies=[Depends(require_api_key)])
 async def search(req: SearchRequest, request: Request) -> SearchResponse:
     async with _admit(request):
         return await _search(req, request)
@@ -174,7 +177,7 @@ async def _search(req: SearchRequest, request: Request) -> SearchResponse:
     return SearchResponse(query=query, results=hits, timing_ms=timing)
 
 
-@router.post("/scrape", response_model=ScrapeResponse, dependencies=[Depends(require_token)])
+@router.post("/scrape", response_model=ScrapeResponse, dependencies=[Depends(require_api_key)])
 async def scrape(req: ScrapeRequest, request: Request) -> ScrapeResponse:
     async with _admit(request):
         return await _scrape(req, request)
@@ -205,7 +208,7 @@ async def _scrape(req: ScrapeRequest, request: Request) -> ScrapeResponse:
     return out
 
 
-@router.post("/map", response_model=MapResponse, dependencies=[Depends(require_token)])
+@router.post("/map", response_model=MapResponse, dependencies=[Depends(require_api_key)])
 async def map_domain(req: MapRequest, request: Request) -> MapResponse:
     svc = request.app.state.services
     urls = await svc.scraper.map_domain(req.domain, req.search)

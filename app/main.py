@@ -104,6 +104,11 @@ async def lifespan(app: FastAPI):
         level=settings.log_level,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    if not settings.api_key or settings.api_key == "change-me":
+        raise RuntimeError(
+            "WS_API_KEY is not set. Every route except /health requires it; "
+            "refusing to start a service anyone could call."
+        )
     services = build_services(settings)
     await services.cache.open()
     # Start Chrome once, not per request: cold launch is ~1.3s of a ~2.7s search.

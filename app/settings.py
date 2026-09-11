@@ -12,7 +12,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="WS_", env_file=".env", extra="ignore")
 
     # service
-    internal_token: str = "change-me"
+    # The one key every caller sends as `X-API-Key`. No default on purpose: the
+    # service refuses to start until it is set (see app.main).
+    api_key: str = ""
     host: str = "0.0.0.0"
     port: int = 8080
     log_level: str = "INFO"

@@ -42,7 +42,7 @@ ssh root@<HOST> 'curl -s localhost:8080/health'
 
 ## Configure
 
-**`.env`** — set `WS_INTERNAL_TOKEN` to a real secret. Keep production pacing
+**`.env`** — set `WS_API_KEY` to a real secret (`openssl rand -hex 32`). Keep production pacing
 (`WS_COOLDOWN_MIN_S=20`, `WS_COOLDOWN_MAX_S=45`); the short dev values exist only so
 local testing is not dominated by waiting.
 
@@ -93,12 +93,33 @@ history, and that accumulated ordinariness is a large part of why the searches
 succeed. Losing the volume resets every identity to cold and suspicious, and there
 is no quick way to regenerate it. Treat it like a database, not a cache.
 
-## Firewall
+## Firewall and exposure
 
-`bootstrap.sh` allows only SSH. The API binds to loopback and must stay there —
-reach it from your backend over a private network or an SSH tunnel, never by
-opening 8080 to the internet. Every route requires `X-Internal-Token`, but that is
-a second lock, not the first one.
+`bootstrap.sh` allows only SSH, and the API binds to loopback. Keep both. To reach
+it from another machine, put it behind a Cloudflare Tunnel: the connection is
+outbound-only, so no inbound port ever opens, and TLS is terminated for you.
+
+```bash
+# on the box — https://pkg.cloudflare.com/cloudflared
+apt-get install -y cloudflared
+cloudflared tunnel login                     # one-time; prints a URL to approve
+cloudflared tunnel create web-search
+cloudflared tunnel route dns web-search search.example.com
+cat > /etc/cloudflared/config.yml <<'EOF'
+tunnel: <TUNNEL_ID>
+credentials-file: /root/.cloudflared/<TUNNEL_ID>.json
+ingress:
+  - hostname: search.example.com
+    service: http://localhost:8080
+  - service: http_status:404
+EOF
+cloudflared service install                  # systemd unit, starts on boot
+curl -s https://search.example.com/health
+```
+
+The API key is then the only lock on the door. Never serve it over plain HTTP, and
+treat the key like a database password: long, random, rotated by editing `.env`
+and running `docker compose up -d`.
 
 ## What it returns
 
