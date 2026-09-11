@@ -1,0 +1,53 @@
+# Per-domain policy.
+#
+# DEFAULT BEHAVIOUR IS GENERIC. Results are opened in the search engine's own
+# order — the engine already ranks them, and overriding that with a hand-written
+# preference list is an opinion this service should not hold by default.
+#
+# Everything below is either (a) a technical fact about a site, or (b) an OPTIONAL
+# opinion you can add for your own corpus. Nothing here is required: an empty
+# `domains:` map works, and unknown domains get the polite defaults.
+#
+# Optional per-domain keys:
+#   rate_per_min       token-bucket refill for this domain
+#   needs_browser      true  -> always render with a browser
+#                      false -> try plain HTTP first, escalate only if unreadable
+#   needs_residential  route through a residential exit (and apply geo)
+#   geo                {lat, lng} handed to the browser; a request can override it
+#   cache_ttl_s        how long we keep a fetched page. YOU set this, not a vendor
+#   respect_robots     explicit, per domain
+#   rank               OPTIONAL. Lower opens first. OMIT IT to use the search
+#                      engine's own ordering, which is the default and usually right
+#   trust              OPTIONAL. What this source's numbers are worth:
+#                        lab        official composition table   -> tier a
+#                        brand      maker's own pack label       -> tier b
+#                        retailer   shop transcribing a label    -> tier c
+#                        aggregator crowd / API aggregate        -> tier d
+#                      Unlisted domains are "unknown" -> tier d. This is a
+#                      judgement about a source, never inferred from the markup:
+#                      a tidy JSON-LD blob from a content farm is still tier d.
+
+defaults:
+  rate_per_min: 6
+  needs_browser: false
+  needs_residential: false
+  cache_ttl_s: 86400
+  respect_robots: true
+
+domains:
+  # The one domain with a genuinely different pacing requirement. Search engines
+  # score request rate far more aggressively than content sites, and the identity
+  # cooldown is the stricter limit anyway.
+  google.com:
+    rate_per_min: 2
+    needs_browser: true
+    cache_ttl_s: 0
+    respect_robots: false
+
+# Domains whose nutrition panel exists ONLY inside a product photo. We still fetch
+# them for name/brand/pack size, but the reader returns rejected:image_only rather
+# than guessing from a title or a meta description — which is exactly how a hosted
+# extractor once invented protein values for us.
+image_only_panels: []
+# Example:
+#   - amazon.in

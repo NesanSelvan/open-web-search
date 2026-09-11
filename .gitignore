@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+# ALL identity files: they hold `id|http://user:pass@proxy|country` lines.
+# The narrow `identities.txt` rule missed identities.scrape.txt, which the
+# service auto-creates on first boot — so it got committed.
+config/identities*.txt
+!config/identities*.example.txt
+profiles/
+# SQLite writes sidecars in WAL mode; -wal and -shm are runtime state too.
+*.db
+*.db-wal
+*.db-shm
+.pytest_cache/

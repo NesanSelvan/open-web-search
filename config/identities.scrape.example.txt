@@ -1,0 +1,18 @@
+# Identities for PAGE FETCHING — separate pool from search, on purpose.
+#
+# Two Chrome instances cannot share a profile directory, and borrowing a search
+# identity puts every page fetch behind the search engine's cooldown. That is what
+# once turned an 8-second resolve into a 120-second one.
+#
+# Page fetching needs no cooldown of its own: per-domain pacing is the governor's
+# job (config/domains.yaml). So these can be few, and a plain datacenter IP is
+# usually fine here — content sites are far less defended than search engines.
+#
+# The exception is geography. A domain marked `needs_residential` serves a
+# DIFFERENT catalogue per location, so an exit in the right country is a
+# correctness requirement, not an anti-blocking one.
+#
+#   <id>|<proxy_url>|<country>      proxy_url may be empty
+
+scrape1||US
+scrape2||US

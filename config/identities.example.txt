@@ -1,0 +1,26 @@
+# One identity per line:  <id>|<proxy_url>|<country>
+#
+# An identity is an inseparable triple — a Chrome profile, ONE residential exit,
+# and a fixed fingerprint. Never repoint an existing id at a different exit: a
+# profile that hops between IPs is itself a detection signal. Retire it and add a
+# new id instead.
+#
+# proxy_url may be left empty to use the host IP. Fine on a laptop for a smoke
+# test; on a VPS Google will block it within about ten queries, because hyperscaler
+# and hosting ASNs are scored as suspicious on sight.
+#
+# Sizing: throughput is pool_size / cooldown. At the default 20-45s cooldown, 20
+# identities sustain ~0.6 q/s (~50k/day). Scale by ADDING identities — never by
+# shortening the cooldown, which is what actually gets exits burnt.
+#
+# Provider note: quality is provider-specific and the good ones are not published.
+# Buy the smallest packet first, run `python -m scripts.proxy_trial`, and only
+# commit once you have a measured block rate. One team measured ~60% blocked on
+# IPRoyal exits that were already tainted before they bought them.
+
+# id1|http://user:pass@gate.example-provider.net:7777|IN
+# id2|http://user:pass@gate.example-provider.net:7778|IN
+# id3|http://user:pass@gate.example-provider.net:7779|IN
+
+# Local smoke test only — no proxy, host IP:
+dev1||IN

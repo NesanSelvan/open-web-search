@@ -1,0 +1,14 @@
+fastapi[standard]
+uvicorn
+pydantic>=2
+pydantic-settings
+httpx[http2]
+playwright
+trafilatura
+selectolax
+aiosqlite
+pyyaml
+tenacity
+python-json-logger
+pytest
+pytest-asyncio

@@ -1,0 +1,27 @@
+services:
+  web-search:
+    container_name: open-web-search
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8080:8080"     # never public; reach it over a private network or SSH tunnel
+    volumes:
+      - ./config/identities.txt:/srv/config/identities.txt:ro
+      - ./config/domains.yaml:/srv/config/domains.yaml:ro
+      - state:/var/lib/open-web-search
+    # Chrome needs real shared memory or it crashes on complex pages.
+    shm_size: "1gb"
+    # One Chrome per leased identity. Cap it so a burst cannot OOM the box.
+    mem_limit: 3g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  # Chrome profiles + the cache DB. BACK THIS UP — the profiles are what make the
+  # identities look aged, and there is no way to regenerate that quickly.
+  state:
