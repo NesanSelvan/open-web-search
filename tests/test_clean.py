@@ -96,3 +96,51 @@ class TestNormaliseForMatch:
 
     def test_unifies_comma_decimals(self):
         assert normalise_for_match("3,5") == "3.5"
+
+
+class TestWhitespaceFromRealPages:
+    """A table cell written across indented HTML arrives carrying its layout.
+    One search-results row was measured with ~19 tabs in it, and a ten-row page
+    with ~190 — garbage to read, and paid for by the token in a model."""
+
+    ROW = (
+        "| [Vada Pav](https://x.test/vada-pav) \t\t\t\t\t\tper 1 piece - "
+        "Calories: 304kcal \\| Fat: 11.91g \t\t\t\t\t\t\t\t\t\tOther sizes: "
+        "\t\t\t1 serving - 304kcal |"
+    )
+
+    def test_collapses_tab_runs_inside_a_line(self):
+        out = tidy(self.ROW)
+        assert "\t" not in out
+
+    def test_keeps_the_content_around_them(self):
+        out = tidy(self.ROW)
+        for kept in ("Vada Pav", "Calories: 304kcal", "Fat: 11.91g", "Other sizes:"):
+            assert kept in out, kept
+
+    def test_keeps_markdown_indentation(self):
+        # Leading whitespace is list nesting and code blocks — not source layout.
+        assert tidy("- a\n  - nested\n    - deeper") == "- a\n  - nested\n    - deeper\n"
+
+    def test_truncates_absurd_leading_indentation(self):
+        # Past a point, leading whitespace is the source's layout leaking through.
+        # (Not the first line: tidy() trims the document's own leading whitespace.)
+        out = tidy("intro\n" + " " * 40 + "text")
+        assert out == "intro\n" + " " * 8 + "text\n"
+
+
+class TestExtractionIsDeterministic:
+    """trafilatura memoises per document and does not key on the options, so a
+    call with different settings could hand back the previous call's result: the
+    same HTML returned 421 chars with its table, then 390 without, purely because
+    an earlier call had asked for no links."""
+
+    def test_same_input_and_options_always_gives_the_same_output(self):
+        a = to_markdown(ARTICLE, "https://example.test/")
+        to_markdown(ARTICLE, "https://example.test/", include_links=False)
+        b = to_markdown(ARTICLE, "https://example.test/")
+        assert a == b
+
+    def test_an_interleaved_call_does_not_drop_the_table(self):
+        to_markdown(ARTICLE, "https://example.test/", include_links=False)
+        assert "Rust" in to_markdown(ARTICLE, "https://example.test/")
