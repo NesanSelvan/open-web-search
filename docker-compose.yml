@@ -1,3 +1,8 @@
+# Pin the project name. Without it compose derives one from the directory, and a
+# checkout deployed from /opt/websearch cannot recreate a container first started
+# from a directory called open-web-search — the fixed container_name collides.
+name: open-web-search
+
 services:
   web-search:
     container_name: open-web-search
