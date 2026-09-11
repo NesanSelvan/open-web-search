@@ -172,6 +172,7 @@ Search, and optionally scrape every result in the same round trip.
 | `raw` | `bool` | `false` | Send `query` verbatim: no query building, no suffix |
 | `lat` / `lng` | `float` | from env | Geolocation handed to the browser |
 | `scrape_deadline_ms` | `int` (200–60000) | `1200` | Hard ceiling on the scrape phase |
+| `scrape_top` | `int` (1–20) | all | Scrape only the first N results; the rest come back as URLs + snippets |
 | `user_id` | `string` | — | Accepted for tracing; not used |
 
 Unknown keys are **ignored**, not rejected. An existing client body works unchanged.

@@ -44,6 +44,10 @@ class SearchRequest(BaseModel):
     # is ~1.5s (859ms of that is Google's own response and cannot be optimised
     # away), so ~1.2s of scrape keeps the whole request under 3s. Raise it when you
     # care more about completeness than latency.
+    # Scrape only the first N results; the rest come back as URLs + snippets.
+    # Reading a page costs ~0.4s of CPU; a caller that reads two pages should
+    # not pay for eight.
+    scrape_top: int | None = Field(default=None, ge=1, le=20)
     scrape_deadline_ms: int = Field(default=1200, ge=200, le=60000)
 
 

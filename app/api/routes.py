@@ -127,8 +127,9 @@ async def _search(req: SearchRequest, request: Request) -> SearchResponse:
             return exc, int((time.perf_counter() - t0) * 1000)
         return page, int((time.perf_counter() - t0) * 1000)
 
+    targets = hits[: req.scrape_top] if req.scrape_top else hits
     scrape_started = time.perf_counter()
-    tasks = [asyncio.create_task(timed_fetch(h.url)) for h in hits]
+    tasks = [asyncio.create_task(timed_fetch(h.url)) for h in targets]
     done, pending = await asyncio.wait(
         tasks, timeout=req.scrape_deadline_ms / 1000, return_when=asyncio.ALL_COMPLETED
     )
@@ -147,31 +148,39 @@ async def _search(req: SearchRequest, request: Request) -> SearchResponse:
     timing["timed_out_pages"] = sum(1 for p, _ in fetched if isinstance(p, TimeoutError))
     pages = [p for p, _ in fetched]
     timing["per_page_ms"] = {
-        h.url.split("/")[2] if "/" in h.url else h.url: ms for h, (_, ms) in zip(hits, fetched)
+        h.url.split("/")[2] if "/" in h.url else h.url: ms for h, (_, ms) in zip(targets, fetched)
     }
 
-    for hit, page in zip(hits, pages):
+    # Reading a page into markdown is CPU work (~0.4s per page) and was running on the
+    # event loop, one page after another: eight cached pages cost ~3s AFTER the search
+    # was done, and every other request — /health included — waited behind it. Run the
+    # conversions in threads, all at once; lxml releases the GIL for most of it.
+    async def read(hit: SearchHit, page: object) -> None:
         if isinstance(page, TimeoutError):
             hit.status = 0
             hit.track = "timeout"
-            continue
+            return
         if isinstance(page, Exception):
             log.info("scrape failed url=%s %s", hit.url, page)
             hit.status = 0
             hit.track = "failed"
-            continue
-
+            return
         hit.status = page.status
         hit.track = page.track
-        hit.page_title = page_title(page.html)
         hit.final_url = page.final_url
+        hit.page_title = await asyncio.to_thread(page_title, page.html)
         if "markdown" in formats:
-            hit.markdown = to_markdown(page.html, page.final_url or page.url)
+            hit.markdown = await asyncio.to_thread(
+                to_markdown, page.html, page.final_url or page.url
+            )
         if "links" in formats:
-            hit.links = _extract_links(page.html)
+            hit.links = await asyncio.to_thread(_extract_links, page.html)
         if "html" in formats:
             hit.html = page.html
 
+    convert_started = time.perf_counter()
+    await asyncio.gather(*(read(h, p) for h, p in zip(targets, pages)))
+    timing["convert_ms"] = int((time.perf_counter() - convert_started) * 1000)
 
     timing["total_ms"] = int((time.perf_counter() - started) * 1000)
     return SearchResponse(query=query, results=hits, timing_ms=timing)
@@ -197,12 +206,12 @@ async def _scrape(req: ScrapeRequest, request: Request) -> ScrapeResponse:
         final_url=page.final_url,
         status=page.status,
         track=page.track,
-        title=page_title(page.html),
+        title=await asyncio.to_thread(page_title, page.html),
     )
     if "markdown" in req.formats:
-        out.markdown = to_markdown(page.html, page.final_url or page.url)
+        out.markdown = await asyncio.to_thread(to_markdown, page.html, page.final_url or page.url)
     if "links" in req.formats:
-        out.links = _extract_links(page.html)
+        out.links = await asyncio.to_thread(_extract_links, page.html)
     if "html" in req.formats:
         out.html = page.html
     return out
