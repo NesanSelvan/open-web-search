@@ -1,8 +1,8 @@
 # Deploying open-web-search
 
-Target: a **dedicated** box. Do not co-locate on the Typesense or PostHog VPS —
-Chrome will fight them for RAM, and the Typesense box has already been OOM-killed
-once at 23.4GB RSS.
+Target: a **dedicated** box. Do not co-locate it with another memory-hungry
+service (a search engine, an analytics store): Chrome will fight it for RAM, and
+the loser of that fight gets OOM-killed.
 
 ## Sizing
 
@@ -14,8 +14,8 @@ identities  = peak requests/sec × cooldown_seconds
 RAM         = identities × ~1GB + ~1.5GB (OS + app + page cache)
 ```
 
-At ~667 lookups/day with a 5× meal-time burst (~1 per 17s), **2–4 identities** is
-enough. That is 4–6GB, so an 8GB box has real headroom.
+At a few hundred lookups/day with a 5x burst at peak (~1 per 17s), **2 to 4
+identities** is enough. That is 4 to 6GB, so an 8GB box has real headroom.
 
 `WS_MAX_OPEN_CONTEXTS` **must be ≥ the identity count.** If there are more
 identities than the cap, every alternate request evicts a live browser and
@@ -44,7 +44,7 @@ ssh root@<HOST> 'curl -s localhost:8080/health'
 
 **Do not `scp -r config` onto a live box.** The first-run line above copies
 `config/` because the box has none yet; on a running deployment that same line
-overwrites `config/identities.txt` — the real identities and their exits — with
+overwrites `config/identities.txt`, the real identities and their exits, with
 whatever the checkout happens to hold (the shipped example is a single
 proxy-less `dev1`). The file is bind-mounted read-only into the container, so the
 damage shows up as a pool that cannot search.
@@ -60,7 +60,7 @@ ssh $HOST 'curl -s -o /dev/null -w "ready:%{http_code}\n" localhost:8080/ready; 
 
 A rebuild restarts Chrome, so every open context is discarded and the in-memory
 quarantine timers reset. The profiles themselves live on the `state` volume and
-survive — including their `.warmed` markers — which is why a restart is not a way
+survive, `.warmed` markers included, which is why a restart is not a way
 to clear a block: the engine's opinion of the profile is on their side, not ours.
 
 ## Configure
@@ -72,8 +72,7 @@ local testing is not dominated by waiting.
 **`config/identities.txt`** — one line per `(profile, exit)` pair.
 
 **Proxies turned out NOT to be required at this volume.** Measured on this box
-(a plain Contabo datacenter IP — no proxy — 12 real queries across 3 fresh
-profiles):
+(a plain datacenter IP, no proxy, 12 real queries across 3 fresh profiles):
 
 | | no warm-up | with warm-up |
 |---|---|---|
@@ -162,7 +161,7 @@ costs 25% of capacity. Keep `WS_MAX_OPEN_CONTEXTS` >= the identity count, and
 budget ~1GB RSS per open context.
 
 **Monitor `/ready`, not `/health`.** `/health` is liveness and stays `200` while
-degraded on purpose — the container healthcheck reads it, and restarting a
+degraded on purpose: the container healthcheck reads it, and restarting a
 degraded process only discards the warm Chrome contexts. `/ready` returns `503`
 with an exact `Retry-After` the moment no identity can search:
 
@@ -171,7 +170,7 @@ curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/ready    # 200 or 503
 curl -s localhost:8080/health | jq '.status, .identity_pool.ready_in_s'
 ```
 
-There is nothing to do during a quarantine but wait it out — the timer is the
+There is nothing to do during a quarantine but wait it out. The timer is the
 whole point. Restarting the container does **not** clear it faster and loses the
 warm contexts. If `retired` is non-empty, that identity is burnt for good: replace
 the exit and give it a fresh id in `config/identities.txt`.

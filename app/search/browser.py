@@ -163,7 +163,7 @@ class BrowserManager:
     async def _warm_profile(self, ctx: BrowserContext, ident: Identity) -> None:
         """Give a brand-new profile a browsing history before it searches.
 
-        Measured on a fresh Contabo box: of 12 queries across 3 new profiles, every
+        Measured on a fresh datacenter box: of 12 queries across 3 new profiles, every
         block landed on a profile's FIRST query, and one profile that got through
         once then went 9-for-9. The datacenter IP was not the problem — a Chrome
         profile with no cookies, no consent state and no history was.

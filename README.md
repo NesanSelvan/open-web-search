@@ -382,7 +382,7 @@ No authentication. Safe to point a monitor at.
 the signal to add residential exits. A steadily rising `queued` means you need more
 identities, not more code.
 
-`status` is `degraded` when every identity is quarantined or retired — the pool
+`status` is `degraded` when every identity is quarantined or retired: the pool
 cannot search at all, and `identity_pool.ready_in_s` says how long until the
 soonest one returns. The route still answers **200** in that state, because the
 container healthcheck reads it and restarting a degraded process only throws away
@@ -402,7 +402,7 @@ on.
 
 `ready_in_s` is `0.0` when an identity is free right now, the exact seconds until
 the soonest timer expires otherwise, and `null` when every identity has been
-retired — nothing to wait for.
+retired, so there is nothing to wait for.
 
 <br>
 
