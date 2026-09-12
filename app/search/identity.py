@@ -90,6 +90,10 @@ class Identity:
     state: State = State.WARM
     ready_at: float = 0.0
     quarantine_level: int = 0
+    # Set when Google caught this identity. The browser manager re-runs the
+    # profile warm-up before the next search instead of walking a just-scored
+    # profile straight back onto the results page.
+    needs_warmup: bool = False
     outcomes: deque[Outcome] = field(default_factory=lambda: deque(maxlen=64))
 
     @property
@@ -209,6 +213,7 @@ class IdentityPool:
             now = self._clock()
 
             if outcome is Outcome.BLOCKED:
+                ident.needs_warmup = True
                 steps = self._s.quarantine_steps
                 level = min(ident.quarantine_level, len(steps) - 1)
                 ident.state = State.QUARANTINED
@@ -217,6 +222,7 @@ class IdentityPool:
             else:
                 if outcome is Outcome.OK:
                     ident.quarantine_level = 0
+                    ident.needs_warmup = False
                 ident.state = State.COOLING
                 ident.ready_at = now + random.uniform(
                     self._s.cooldown_min_s, self._s.cooldown_max_s
@@ -254,7 +260,28 @@ class IdentityPool:
         return chosen
 
     # ---------------------------------------------------------------- health
+    _LIVE = (State.WARM, State.LEASED, State.COOLING)
+
+    def _usable(self) -> bool:
+        return any(i.state in self._LIVE for i in self._identities.values())
+
+    def _ready_in_s(self) -> float | None:
+        """Seconds until an identity can search. 0.0 if one can right now,
+        None if every identity is retired and waiting will not help."""
+        now = self._clock()
+        waits = []
+        for ident in self._identities.values():
+            if ident.state in (State.WARM, State.LEASED):
+                waits.append(0.0)
+            elif ident.state in (State.COOLING, State.QUARANTINED):
+                waits.append(max(0.0, ident.ready_at - now))
+        return round(min(waits), 1) if waits else None
+
     def health(self) -> dict[str, object]:
+        # Sweep first. State only advanced inside acquire(), so on an idle box a
+        # pool whose timers had all expired kept reporting itself quarantined —
+        # health described the last request, not the present.
+        self._promote_ready()
         counts: dict[str, int] = {s.value: 0 for s in State}
         for ident in self._identities.values():
             counts[ident.state.value] += 1
@@ -268,4 +295,9 @@ class IdentityPool:
             "states": counts,
             "block_rate": round(blocked / total_outcomes, 3) if total_outcomes else 0.0,
             "retired": [i.id for i in self._identities.values() if i.state is State.RETIRED],
+            # Can this pool serve a search at all, and if not, when?
+            # COOLING is normal operation (seconds); QUARANTINED is minutes to
+            # hours, and RETIRED is forever — a pool holding only those is down.
+            "usable": self._usable(),
+            "ready_in_s": self._ready_in_s(),
         }

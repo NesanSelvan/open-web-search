@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <code>POST /search</code> · <code>POST /scrape</code> · <code>POST /map</code> · <code>GET /health</code><br>
+  <code>POST /search</code> · <code>POST /scrape</code> · <code>POST /map</code> · <code>GET /health</code> · <code>GET /ready</code><br>
   <sub>FastAPI · Playwright · real Chrome under Xvfb · SQLite cache · MIT</sub>
 </p>
 
@@ -352,11 +352,14 @@ No authentication. Safe to point a monitor at.
 ```json
 {
   "ok": true,
+  "status": "ok",
   "identity_pool": {
     "total": 3,
     "states": { "warm": 2, "leased": 0, "cooling": 1, "quarantined": 0, "retired": 0 },
     "block_rate": 0.0,
-    "retired": []
+    "retired": [],
+    "usable": true,
+    "ready_in_s": 0.0
   },
   "browsers": {
     "open_contexts": 1, "open_tabs": 0,
@@ -379,6 +382,28 @@ No authentication. Safe to point a monitor at.
 the signal to add residential exits. A steadily rising `queued` means you need more
 identities, not more code.
 
+`status` is `degraded` when every identity is quarantined or retired — the pool
+cannot search at all, and `identity_pool.ready_in_s` says how long until the
+soonest one returns. The route still answers **200** in that state, because the
+container healthcheck reads it and restarting a degraded process only throws away
+warm Chrome contexts. Alert on `/ready` instead.
+
+<br>
+
+### `GET /ready`
+
+No authentication. Readiness, not liveness: **200** while a search can run,
+**503** with `Retry-After` while every identity is parked. This is the one to page
+on.
+
+```json
+{ "ready": true, "ready_in_s": 0.0, "identity_pool": { "...": "as above" } }
+```
+
+`ready_in_s` is `0.0` when an identity is free right now, the exact seconds until
+the soonest timer expires otherwise, and `null` when every identity has been
+retired — nothing to wait for.
+
 <br>
 
 ## Errors
@@ -390,7 +415,7 @@ Every error is `{"detail": "..."}` with a meaningful status.
 | `401` | Missing or unrecognised API key | Fix the key. Not retryable |
 | `502` | The page could not be fetched (`/scrape`) | Usually the target site. Retry once |
 | `503` | Overloaded: in-flight and queue are both full | Back off for `Retry-After` seconds |
-| `503` | Search unavailable: no identity could get through | Retry with backoff; check `/health` |
+| `503` | Search unavailable: no identity could get through | Back off for `Retry-After` seconds; watch `/ready` |
 
 Both `503` forms carry a **`Retry-After`** header. A refusal you can act on
 immediately beats a 90-second wait that ends in a timeout.

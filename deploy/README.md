@@ -40,6 +40,29 @@ ssh root@<HOST> 'cd /opt/websearch && docker compose up -d --build'
 ssh root@<HOST> 'curl -s localhost:8080/health'
 ```
 
+## Shipping an update to a box that is already running
+
+**Do not `scp -r config` onto a live box.** The first-run line above copies
+`config/` because the box has none yet; on a running deployment that same line
+overwrites `config/identities.txt` — the real identities and their exits — with
+whatever the checkout happens to hold (the shipped example is a single
+proxy-less `dev1`). The file is bind-mounted read-only into the container, so the
+damage shows up as a pool that cannot search.
+
+Ship code only, and leave the box's own config and `.env` alone:
+
+```bash
+HOST=root@<HOST>
+scp -r app scripts deploy requirements.txt Dockerfile docker-compose.yml $HOST:/opt/websearch/
+ssh $HOST 'cd /opt/websearch && docker compose up -d --build'
+ssh $HOST 'curl -s -o /dev/null -w "ready:%{http_code}\n" localhost:8080/ready; curl -s localhost:8080/health | jq -c .status,.identity_pool.states'
+```
+
+A rebuild restarts Chrome, so every open context is discarded and the in-memory
+quarantine timers reset. The profiles themselves live on the `state` volume and
+survive — including their `.warmed` markers — which is why a restart is not a way
+to clear a block: the engine's opinion of the profile is on their side, not ours.
+
 ## Configure
 
 **`.env`** — set `WS_API_KEY` to a real secret (`openssl rand -hex 32`). Keep production pacing
@@ -120,6 +143,38 @@ curl -s https://search.example.com/health
 The API key is then the only lock on the door. Never serve it over plain HTTP, and
 treat the key like a database password: long, random, rotated by editing `.env`
 and running `docker compose up -d`.
+
+## When the pool goes dark
+
+Every identity quarantined at once, so every `/search` answers
+
+```
+503 no warm identity within 15s ({'warm': 0, 'quarantined': 2, ...})
+```
+
+while `/health` keeps saying `ok: true`. Nothing alerts, because liveness was
+never the thing that broke.
+
+**Run at least 4 identities.** Quarantine is 5 min on the first block, 30 min on
+the second, 4 h after that (`WS_QUARANTINE_STEPS_S`). With two identities, one bad
+minute from the engine takes the whole service down; with four, the same block
+costs 25% of capacity. Keep `WS_MAX_OPEN_CONTEXTS` >= the identity count, and
+budget ~1GB RSS per open context.
+
+**Monitor `/ready`, not `/health`.** `/health` is liveness and stays `200` while
+degraded on purpose — the container healthcheck reads it, and restarting a
+degraded process only discards the warm Chrome contexts. `/ready` returns `503`
+with an exact `Retry-After` the moment no identity can search:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' localhost:8080/ready    # 200 or 503
+curl -s localhost:8080/health | jq '.status, .identity_pool.ready_in_s'
+```
+
+There is nothing to do during a quarantine but wait it out — the timer is the
+whole point. Restarting the container does **not** clear it faster and loses the
+warm contexts. If `retired` is non-empty, that identity is burnt for good: replace
+the exit and give it a fresh id in `config/identities.txt`.
 
 ## What it returns
 

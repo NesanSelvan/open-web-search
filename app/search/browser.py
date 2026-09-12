@@ -173,10 +173,19 @@ class BrowserManager:
         allowed to search.
         """
         marker = ident.profile_dir / ".warmed"
-        if marker.exists():
+        first_run = not marker.exists()
+        if not first_run and not ident.needs_warmup:
             return
 
-        log.info("warming new profile %s before first search", ident.id)
+        # `needs_warmup` is set when a search came back BLOCKED. Walking a
+        # profile the engine just scored straight back onto the results page is
+        # how a five-minute quarantine becomes a thirty-minute one, so it lands
+        # on the home page and settles again first.
+        log.info(
+            "warming profile %s before search (%s)",
+            ident.id,
+            "new profile" if first_run else "after block",
+        )
         page = await ctx.new_page()
         try:
             await page.goto("https://www.google.com/", wait_until="domcontentloaded", timeout=30_000)
@@ -191,6 +200,10 @@ class BrowserManager:
                     continue
             await asyncio.sleep(random.uniform(1.5, 3.0))
             marker.write_text("warmed\n")
+            # Only a warm-up that actually ran clears the flag; a failed one
+            # leaves it set so the next attempt tries again rather than
+            # silently dropping the protection.
+            ident.needs_warmup = False
             log.info("profile %s warmed", ident.id)
         except Exception as exc:
             # A failed warm-up is not fatal: the search path has its own retry and
@@ -225,6 +238,11 @@ class BrowserManager:
                 await self._evict_if_needed(keep=ident.id)
                 ctx = await _launch(self._pw, ident, self._s)
                 self._contexts[ident.id] = ctx
+                await self._warm_profile(ctx, ident)
+            elif ident.needs_warmup:
+                # The context outlives the quarantine, so a blocked identity
+                # usually comes back to a browser that is still open. Re-warm on
+                # the live context rather than only on a fresh launch.
                 await self._warm_profile(ctx, ident)
 
             self._last_used[ident.id] = time.monotonic()

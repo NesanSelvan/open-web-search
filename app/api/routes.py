@@ -37,6 +37,18 @@ async def require_api_key(x_api_key: str = Header(default="", alias="X-API-Key")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing X-API-Key")
 
 
+def _unavailable(pool, detail: str) -> HTTPException:
+    """503 for a pool that has nothing to search with, with an honest wait.
+
+    The identity timers already know when the next one comes back, so the caller
+    is told the real number instead of retrying blind into a pool that is parked
+    precisely because it was hit too hard.
+    """
+    wait = pool.health().get("ready_in_s")
+    headers = {"Retry-After": str(max(1, int(wait)))} if wait is not None else None
+    return HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail, headers=headers)
+
+
 @contextlib.asynccontextmanager
 async def _admit(request: Request):
     """Take a concurrency slot, or refuse now with Retry-After.
@@ -99,7 +111,7 @@ async def _search(req: SearchRequest, request: Request) -> SearchResponse:
             timing=timing,
         )
     except SearchUnavailable as exc:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+        raise _unavailable(request.app.state.services.pool, str(exc)) from exc
 
     hits = [
         SearchHit(url=r.url, title=r.title, snippet=r.snippet, rank=r.rank) for r in results
@@ -227,10 +239,20 @@ async def map_domain(req: MapRequest, request: Request) -> MapResponse:
 
 @router.get("/health")
 async def health(request: Request) -> dict:
+    """Liveness, plus everything worth knowing about the pool.
+
+    Always 200 while the process is answering: the container healthcheck reads
+    this, and an unhealthy container is one autoheal rule away from a restart
+    that discards the warm Chrome contexts — the opposite of what a blocked
+    identity needs. `status` carries the bad news; /ready is what pages you.
+    """
     svc = request.app.state.services
+    pool = svc.pool.health()
+    usable = bool(pool.get("usable", True))
     return {
-        "ok": True,
-        "identity_pool": svc.pool.health(),
+        "ok": usable,
+        "status": "ok" if usable else "degraded",
+        "identity_pool": pool,
         "browsers": {
             "open_contexts": svc.browsers.open_contexts(),
             "open_tabs": svc.browsers.open_tabs(),
@@ -244,3 +266,26 @@ async def health(request: Request) -> dict:
         },
         "cache": await svc.cache.stats(),
     }
+
+
+@router.get("/ready")
+async def ready(request: Request) -> dict:
+    """Readiness: can a search run right now?
+
+    Split from /health after an outage where both identities sat quarantined,
+    every /search 503'd, and /health answered `ok: true` for the whole window —
+    so no monitor ever fired. 503 here is the signal to alert on, and the
+    Retry-After is exact rather than guessed: it comes from the soonest
+    identity's own timer.
+    """
+    pool = request.app.state.services.pool.health()
+    wait = pool.get("ready_in_s")
+    if pool.get("usable", True):
+        return {"ready": True, "ready_in_s": wait, "identity_pool": pool}
+
+    retry_after = int(wait) if wait is not None else 3600
+    raise HTTPException(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        f"no identity can search: {pool['states']}",
+        headers={"Retry-After": str(max(1, retry_after))},
+    )
