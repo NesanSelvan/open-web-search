@@ -37,18 +37,21 @@ class SearchRequest(BaseModel):
     )
     lat: float | None = None
     lng: float | None = None
-    # Hard ceiling on the scrape phase. Pages still in flight when it expires come
-    # back as track="timeout" rather than holding the whole response hostage — one
-    # slow site should cost that site's result, not the request.
-    # Default sized against a measured budget, not a guess: a warm Google search
-    # is ~1.5s (859ms of that is Google's own response and cannot be optimised
-    # away), so ~1.2s of scrape keeps the whole request under 3s. Raise it when you
-    # care more about completeness than latency.
     # Scrape only the first N results; the rest come back as URLs + snippets.
     # Reading a page costs ~0.4s of CPU; a caller that reads two pages should
     # not pay for eight.
     scrape_top: int | None = Field(default=None, ge=1, le=20)
-    scrape_deadline_ms: int = Field(default=1200, ge=200, le=60000)
+    # Hard ceiling on the scrape phase. Pages still in flight when it expires come
+    # back as track="timeout" rather than holding the whole response hostage: one
+    # slow site should cost that site's result, not the request.
+    # The first default was 1200ms, sized to keep a search-plus-scrape under 3s.
+    # It optimised the wrong thing. A caller that asked for page content and got
+    # `track: "timeout"` has to fetch the page itself, so the deadline saved a
+    # second and cost a round trip. Anything latency-sensitive already sends its
+    # own value (the field is per-request), so the default now serves the caller
+    # who just wants the content: 6s covers the slow-but-real pages that a 1.2s
+    # ceiling was cutting off, and a genuinely dead host still costs only 6s.
+    scrape_deadline_ms: int = Field(default=6000, ge=200, le=60000)
 
 
 class SearchHit(BaseModel):

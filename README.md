@@ -171,7 +171,7 @@ Search, and optionally scrape every result in the same round trip.
 | `brand` | `string` | — | Prepended to the query |
 | `raw` | `bool` | `false` | Send `query` verbatim: no query building, no suffix |
 | `lat` / `lng` | `float` | from env | Geolocation handed to the browser |
-| `scrape_deadline_ms` | `int` (200–60000) | `1200` | Hard ceiling on the scrape phase |
+| `scrape_deadline_ms` | `int` (200–60000) | `6000` | Hard ceiling on the scrape phase |
 | `scrape_top` | `int` (1–20) | all | Scrape only the first N results; the rest come back as URLs + snippets |
 | `user_id` | `string` | — | Accepted for tracing; not used |
 
@@ -235,7 +235,7 @@ Each entry in `results[]`:
     "google_ms": 1145,
     "serp_phases_ms": { "tab": 0, "commit": 175, "results": 523, "resolve": 113, "dwell|resolve": 445, "release": 0 },
     "scrape_ms": 1201,
-    "scrape_deadline_ms": 1200,
+    "scrape_deadline_ms": 6000,
     "timed_out_pages": 1,
     "per_page_ms": { "component-model.bytecodealliance.org": 412, "example.dev": 1200 },
     "total_ms": 2597
@@ -452,7 +452,7 @@ spends nothing.
 |---|---|
 | Search, new query | **\~1.2 s** warm (0.7–2.3 s measured): engine time to first byte, results landing in the DOM, a jittered dwell |
 | Search, repeated | **\~30 ms** |
-| Search + scrape | search + at most `scrape_deadline_ms` (1.2 s default) |
+| Search + scrape | search + at most `scrape_deadline_ms` (6 s default; send a lower value when latency beats completeness) |
 | First search after idle | +\~1.3 s for a Chrome relaunch; `WS_CONTEXT_IDLE_TTL_S` sets how often that happens |
 
 Throughput is `identities ÷ cooldown`. Each warm identity holds a live Chrome, so
