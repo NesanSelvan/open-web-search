@@ -8,6 +8,11 @@ services:
     container_name: open-web-search
     build: .
     restart: unless-stopped
+    # Reap zombies. uvicorn is PID 1 and never wait()s for orphaned chrome /
+    # chrome_crashpad children; without an init they pile up until the cgroup
+    # pid cap (systemd DefaultTasksMax, ~9.5k here) stops Chrome creating a
+    # thread. 2026-09-18: 9098 zombies in 5 days, then every search 503.
+    init: true
     env_file: .env
     ports:
       - "127.0.0.1:8080:8080"     # never public; reach it over a private network or SSH tunnel

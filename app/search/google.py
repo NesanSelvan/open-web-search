@@ -469,6 +469,7 @@ class GoogleSearcher:
                     + int((time.perf_counter() - wait_started) * 1000)
                 )
             google_started = time.perf_counter()
+            generation = self._browsers.generation if self._browsers is not None else 0
 
             try:
                 results = await _search_once(
@@ -491,6 +492,11 @@ class GoogleSearcher:
                 log.warning("serp error attempt=%d identity=%s %s", attempt + 1, ident.id, exc)
                 await self._pool.release(ident, Outcome.ERROR)
                 last = exc
+                # A dead Playwright driver fails every identity identically, so
+                # burning the remaining attempts on it is pointless. Restart it
+                # and let the next attempt launch a fresh Chrome.
+                if self._browsers is not None:
+                    await self._browsers.note_failure(exc, generation)
                 continue
 
             await self._pool.release(ident, Outcome.OK)

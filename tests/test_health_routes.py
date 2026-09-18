@@ -20,7 +20,7 @@ from app.search.identity import Identity, IdentityPool, Outcome
 from app.settings import Settings
 
 
-def make_request(pool) -> types.SimpleNamespace:
+def make_request(pool, driver_alive: bool = True) -> types.SimpleNamespace:
     settings = Settings(api_key="k", max_tabs_per_context=6, max_open_contexts=2)
 
     async def stats():
@@ -29,7 +29,9 @@ def make_request(pool) -> types.SimpleNamespace:
     services = types.SimpleNamespace(
         pool=pool,
         settings=settings,
-        browsers=types.SimpleNamespace(open_contexts=lambda: 0, open_tabs=lambda: 0),
+        browsers=types.SimpleNamespace(
+            open_contexts=lambda: 0, open_tabs=lambda: 0, driver_alive=lambda: driver_alive
+        ),
         admission=types.SimpleNamespace(stats=lambda: {"in_flight": 0}),
         searcher=types.SimpleNamespace(_flight=types.SimpleNamespace(stats=lambda: {})),
         cache=types.SimpleNamespace(stats=stats),
@@ -117,3 +119,17 @@ class TestSearchUnavailable:
 
         assert exc.status_code == 503
         assert not exc.headers
+
+
+class TestReadyDriver:
+    async def test_503_when_the_browser_driver_is_dead_even_with_a_warm_pool(self):
+        # 2026-09-18: every identity warm, driver gone, /ready said 200 for 3h.
+        with pytest.raises(HTTPException) as exc:
+            await ready(make_request(make_pool(), driver_alive=False))
+        assert exc.value.status_code == 503
+        assert "driver" in exc.value.detail
+        assert exc.value.headers["Retry-After"] == "5"
+
+    async def test_health_reports_driver_state(self):
+        body = await health(make_request(make_pool(), driver_alive=False))
+        assert body["browsers"]["driver_alive"] is False

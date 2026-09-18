@@ -36,6 +36,24 @@ from app.settings import Settings
 
 log = logging.getLogger(__name__)
 
+# Messages Playwright raises once its Node driver is gone. They are not per-page
+# failures: once the driver dies EVERY identity fails the same way and nothing
+# short of a fresh `async_playwright().start()` brings it back. Seen 2026-09-18:
+# a zombie leak hit the container pid cap, Chrome could not create a thread, the
+# page crashed, the driver hit an internal assertion and exited — and the service
+# then 503'd every search for three hours while /ready said fine.
+_DRIVER_DEAD_MARKERS = (
+    "the handler is closed",
+    "connection closed while reading from the driver",
+    "event loop is closed",
+)
+
+
+def driver_dead(exc: BaseException) -> bool:
+    """True when `exc` means the Playwright driver itself is gone."""
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _DRIVER_DEAD_MARKERS)
+
 # Flags that remove automation tells without pretending to be a stealth plugin.
 # --disable-blink-features=AutomationControlled is the one that actually matters:
 # without it navigator.webdriver is true and nothing else you do will save you.
@@ -112,12 +130,55 @@ class BrowserManager:
         self._locks: dict[str, asyncio.Lock] = {}
         self._guard = asyncio.Lock()
         self._reaper: asyncio.Task | None = None
+        # Bumped on every driver restart. A caller that saw the driver die
+        # passes the generation it was using, so ten identities failing on the
+        # same dead driver trigger one restart, not ten.
+        self._generation = 0
+        self._restarting = asyncio.Lock()
 
     async def start(self) -> None:
         if self._pw is None:
             self._pw = await async_playwright().start()
         if self._reaper is None:
             self._reaper = asyncio.create_task(self._reap_idle())
+
+    @property
+    def generation(self) -> int:
+        return self._generation
+
+    def driver_alive(self) -> bool:
+        return self._pw is not None
+
+    async def restart(self, reason: str, seen_generation: int | None = None) -> None:
+        """Throw away the dead driver and every context on it, then start fresh.
+
+        Contexts are not closed — their driver is gone, so a close would just
+        raise — they are dropped, and the next `context()` relaunches Chrome.
+        """
+        async with self._restarting:
+            if seen_generation is not None and seen_generation != self._generation:
+                return                                   # someone already did it
+            log.error("browser driver dead (%s); restarting playwright", reason)
+            self._contexts.clear()
+            self._last_used.clear()
+            self._tab_sems.clear()
+            self._search_tabs.clear()
+            for task in self._parking.values():
+                task.cancel()
+            self._parking.clear()
+            pw, self._pw = self._pw, None
+            if pw is not None:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(pw.stop(), timeout=5)
+            self._generation += 1
+            await self.start()
+
+    async def note_failure(self, exc: BaseException, seen_generation: int) -> bool:
+        """Called by a caller whose browser call failed. Restarts if the driver died."""
+        if not driver_dead(exc):
+            return False
+        await self.restart(str(exc), seen_generation=seen_generation)
+        return True
 
     async def _reap_idle(self) -> None:
         """Close contexts nobody has used lately.
@@ -236,7 +297,14 @@ class BrowserManager:
             if ctx is None:
                 assert self._pw is not None
                 await self._evict_if_needed(keep=ident.id)
-                ctx = await _launch(self._pw, ident, self._s)
+                gen = self._generation
+                try:
+                    ctx = await _launch(self._pw, ident, self._s)
+                except Exception as exc:
+                    if not await self.note_failure(exc, gen):
+                        raise
+                    assert self._pw is not None
+                    ctx = await _launch(self._pw, ident, self._s)
                 self._contexts[ident.id] = ctx
                 await self._warm_profile(ctx, ident)
             elif ident.needs_warmup:
@@ -304,7 +372,12 @@ class BrowserManager:
             ident.id, asyncio.Semaphore(self._s.max_tabs_per_context)
         )
         async with sem:
-            tab = await ctx.new_page()
+            gen = self._generation
+            try:
+                tab = await ctx.new_page()
+            except Exception as exc:
+                await self.note_failure(exc, gen)
+                raise
             try:
                 yield tab
             finally:

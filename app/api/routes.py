@@ -254,6 +254,7 @@ async def health(request: Request) -> dict:
         "status": "ok" if usable else "degraded",
         "identity_pool": pool,
         "browsers": {
+            "driver_alive": svc.browsers.driver_alive(),
             "open_contexts": svc.browsers.open_contexts(),
             "open_tabs": svc.browsers.open_tabs(),
             "max_tabs_per_context": svc.settings.max_tabs_per_context,
@@ -278,8 +279,17 @@ async def ready(request: Request) -> dict:
     Retry-After is exact rather than guessed: it comes from the soonest
     identity's own timer.
     """
-    pool = request.app.state.services.pool.health()
+    svc = request.app.state.services
+    pool = svc.pool.health()
     wait = pool.get("ready_in_s")
+    if not svc.browsers.driver_alive():
+        # The identities may all be warm, but nothing can drive a browser.
+        # This was the blind spot on 2026-09-18: driver dead, /ready 200.
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "browser driver is down",
+            headers={"Retry-After": "5"},
+        )
     if pool.get("usable", True):
         return {"ready": True, "ready_in_s": wait, "identity_pool": pool}
 
