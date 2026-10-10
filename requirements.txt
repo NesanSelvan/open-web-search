@@ -5,7 +5,7 @@ pydantic-settings
 httpx[http2]
 playwright
 trafilatura
-selectolax
+selectolax<1.0  # 1.0 removed the Modest backend that `selectolax.parser` uses
 aiosqlite
 pyyaml
 tenacity

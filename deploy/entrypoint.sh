@@ -13,6 +13,12 @@ DISPLAY_NUM="${DISPLAY_NUM:-99}"
 SCREEN="${XVFB_SCREEN:-1920x1080x24}"
 export DISPLAY=":${DISPLAY_NUM}"
 
+# A crashed run leaves its X lock and socket in /tmp, and `restart: unless-stopped`
+# reuses the same container layer, so Xvfb refuses with "Server is already active
+# for display" and the container crashloops until it is recreated. Nothing else in
+# this container owns the display, so anything left here is stale.
+rm -f "/tmp/.X${DISPLAY_NUM}-lock" "/tmp/.X11-unix/X${DISPLAY_NUM}"
+
 echo "[entrypoint] starting Xvfb on ${DISPLAY} (${SCREEN})"
 Xvfb "${DISPLAY}" -screen 0 "${SCREEN}" -nolisten tcp &
 XVFB_PID=$!
