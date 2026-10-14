@@ -27,6 +27,7 @@ import contextlib
 import logging
 import random
 import time
+from pathlib import Path
 from typing import AsyncIterator
 
 from playwright.async_api import BrowserContext, Page, Playwright, async_playwright
@@ -123,6 +124,8 @@ class BrowserManager:
         self._s = settings
         self._pw: Playwright | None = None
         self._contexts: dict[str, BrowserContext] = {}
+        # Which profile dir each open context was launched on (see context()).
+        self._ctx_dirs: dict[str, Path] = {}
         # Tabs, not browsers, are how this gets concurrency. A new tab costs ~55ms
         # and tens of MB; a second browser costs ~1330ms and ~1GB. The semaphore
         # stops one burst opening a hundred tabs in a single Chrome.
@@ -206,6 +209,7 @@ class BrowserManager:
 
     async def _close_one(self, ident_id: str, reason: str) -> None:
         ctx = self._contexts.pop(ident_id, None)
+        self._ctx_dirs.pop(ident_id, None)
         self._last_used.pop(ident_id, None)
         self._tab_sems.pop(ident_id, None)
         self._search_tabs.pop(ident_id, None)
@@ -290,6 +294,11 @@ class BrowserManager:
         lock = await self._lock_for(ident.id)
         async with lock:
             ctx = self._contexts.get(ident.id)
+            if ctx is not None and self._ctx_dirs.get(ident.id) != ident.profile_dir:
+                # The pool rotated this identity onto a fresh profile; the open
+                # Chrome still holds the burnt one.
+                await self._close_one(ident.id, reason="profile rotated")
+                ctx = None
             if ctx is not None:
                 try:
                     # Cheap liveness probe: a crashed context raises here rather
@@ -311,6 +320,7 @@ class BrowserManager:
                     assert self._pw is not None
                     ctx = await _launch(self._pw, ident, self._s)
                 self._contexts[ident.id] = ctx
+                self._ctx_dirs[ident.id] = ident.profile_dir
                 await self._warm_profile(ctx, ident)
             elif ident.needs_warmup:
                 # The context outlives the quarantine, so a blocked identity

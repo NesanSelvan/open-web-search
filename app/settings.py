@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     quarantine_steps_s: str = "300,1800,14400"
     retire_block_rate: float = 0.4
     retire_window: int = 20
+    # Self-healing: after this many blocks in a row (the re-warm included) an
+    # identity gets a brand-new profile dir instead of a longer quarantine.
+    # 0 = off. rotate_max_per_hour is the box-wide brake for a flagged exit.
+    rotate_after_blocks: int = 0
+    rotate_max_per_hour: int = 4
     acquire_timeout_s: float = 90.0
 
     # chrome

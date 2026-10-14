@@ -20,14 +20,38 @@ Two rules that matter more than pool size:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import enum
+import logging
 import random
+import shutil
 import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.settings import Settings
+
+log = logging.getLogger(__name__)
+
+
+def profile_dir_for(root: Path, ident_id: str, generation: int) -> Path:
+    """Generation 0 is the original `<root>/<id>`; each rotation gets `<id>.g<n>`."""
+    return root / ident_id if generation == 0 else root / f"{ident_id}.g{generation}"
+
+
+def _generation_file(root: Path, ident_id: str) -> Path:
+    # A file beside the profile dirs, not inside one: it must survive the dir it
+    # points away from being pruned, and a restart must not walk back onto a
+    # profile the engine already burnt.
+    return root / f".{ident_id}.generation"
+
+
+def read_generation(root: Path, ident_id: str) -> int:
+    try:
+        return int(_generation_file(root, ident_id).read_text().strip())
+    except (OSError, ValueError):
+        return 0
 
 # Fingerprints are pinned per identity and never rotated. A profile whose UA or
 # viewport changes between sessions looks like a fresh install every time.
@@ -94,6 +118,10 @@ class Identity:
     # profile warm-up before the next search instead of walking a just-scored
     # profile straight back onto the results page.
     needs_warmup: bool = False
+    # Self-healing (see IdentityPool._rotate). A profile blocked again right after
+    # its re-warm is burnt for this exit; it gets a brand-new profile directory.
+    generation: int = 0
+    consecutive_blocks: int = 0
     outcomes: deque[Outcome] = field(default_factory=lambda: deque(maxlen=64))
 
     @property
@@ -116,6 +144,8 @@ class IdentityPool:
         self._s = settings
         self._clock = clock
         self._cv = asyncio.Condition()
+        self._rotations: deque[float] = deque()
+        self.rotated_total = 0
 
     # ---------------------------------------------------------------- factory
     @classmethod
@@ -137,7 +167,8 @@ class IdentityPool:
             proxy = ProxyConfig.parse(parts[1] if len(parts) > 1 else "")
             country = parts[2] if len(parts) > 2 else settings.default_country
             ua, vw, vh = _FINGERPRINTS[n % len(_FINGERPRINTS)]
-            profile_dir = settings.profile_root / ident_id
+            generation = read_generation(settings.profile_root, ident_id)
+            profile_dir = profile_dir_for(settings.profile_root, ident_id, generation)
             profile_dir.mkdir(parents=True, exist_ok=True)
             identities.append(
                 Identity(
@@ -149,6 +180,7 @@ class IdentityPool:
                     viewport=(vw, vh),
                     locale=settings.locale,
                     timezone=settings.timezone,
+                    generation=generation,
                 )
             )
         return cls(identities, settings, clock)
@@ -213,6 +245,11 @@ class IdentityPool:
             now = self._clock()
 
             if outcome is Outcome.BLOCKED:
+                ident.consecutive_blocks += 1
+                if self._should_rotate(ident, now):
+                    self._rotate(ident, now)
+                    self._cv.notify_all()
+                    return
                 ident.needs_warmup = True
                 steps = self._s.quarantine_steps
                 level = min(ident.quarantine_level, len(steps) - 1)
@@ -221,6 +258,7 @@ class IdentityPool:
                 ident.quarantine_level = min(ident.quarantine_level + 1, len(steps) - 1)
             else:
                 if outcome is Outcome.OK:
+                    ident.consecutive_blocks = 0
                     ident.quarantine_level = 0
                     ident.needs_warmup = False
                 ident.state = State.COOLING
@@ -235,9 +273,63 @@ class IdentityPool:
                 recent = list(ident.outcomes)[-window:]
                 rate = sum(1 for o in recent if o is Outcome.BLOCKED) / window
                 if rate >= self._s.retire_block_rate:
-                    ident.state = State.RETIRED
+                    if self._may_rotate(now):
+                        self._rotate(ident, now)
+                    else:
+                        ident.state = State.RETIRED
 
             self._cv.notify_all()
+
+    # ---------------------------------------------------------------- self-healing
+    def _may_rotate(self, now: float) -> bool:
+        """Box-wide brake. When the exit itself is flagged, fresh profiles burn as
+        fast as old ones; past this many rotations an hour the pool falls back to
+        plain quarantine and waits it out instead of churning profiles."""
+        if self._s.rotate_after_blocks <= 0:
+            return False
+        while self._rotations and self._rotations[0] <= now - 3600:
+            self._rotations.popleft()
+        return len(self._rotations) < self._s.rotate_max_per_hour
+
+    def _should_rotate(self, ident: Identity, now: float) -> bool:
+        return (
+            self._s.rotate_after_blocks > 0
+            and ident.consecutive_blocks >= self._s.rotate_after_blocks
+            and self._may_rotate(now)
+        )
+
+    def _rotate(self, ident: Identity, now: float) -> None:
+        """Swap a burnt profile for a brand-new one under the same identity id.
+
+        Observed: once caught, aged profiles kept drawing a CAPTCHA on their first
+        search after every quarantine, for hours, while brand-new profiles on the
+        same exit got clean results. The burn sits on the profile
+        (cookies, history), so waiting it out wastes the identity; a new profile
+        directory does not. The new one gets the normal first-run warm-up.
+        """
+        root = self._s.profile_root
+        old_gen = ident.generation
+        ident.generation += 1
+        ident.profile_dir = profile_dir_for(root, ident.id, ident.generation)
+        ident.profile_dir.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            _generation_file(root, ident.id).write_text(f"{ident.generation}\n")
+        ident.consecutive_blocks = 0
+        ident.quarantine_level = 0
+        ident.needs_warmup = False
+        ident.outcomes.clear()
+        ident.state = State.COOLING
+        ident.ready_at = now + random.uniform(self._s.cooldown_min_s, self._s.cooldown_max_s)
+        self._rotations.append(now)
+        self.rotated_total += 1
+        log.warning("identity %s burnt, rotated to fresh profile %s", ident.id, ident.profile_dir.name)
+        # Keep the previous generation (one step of evidence), drop the one before.
+        if old_gen >= 1:
+            stale = profile_dir_for(root, ident.id, old_gen - 1)
+            with contextlib.suppress(RuntimeError):
+                asyncio.get_running_loop().run_in_executor(
+                    None, lambda: shutil.rmtree(stale, ignore_errors=True)
+                )
 
     def pick_shared(self) -> Identity:
         """An identity to SHARE, without leasing it exclusively.
@@ -300,4 +392,6 @@ class IdentityPool:
             # hours, and RETIRED is forever — a pool holding only those is down.
             "usable": self._usable(),
             "ready_in_s": self._ready_in_s(),
+            "rotated_total": self.rotated_total,
+            "generations": {i.id: i.generation for i in self._identities.values() if i.generation},
         }
