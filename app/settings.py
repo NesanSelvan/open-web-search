@@ -58,6 +58,10 @@ class Settings(BaseSettings):
 
     # search
     search_max_retries: int = 3
+    # Box-wide ceiling on fresh searches (cache misses, retries included) per
+    # rolling minute. The exit IP is what gets flagged, not one profile, so this is
+    # the limit that protects every identity at once. 0 = no ceiling.
+    fresh_serp_per_min: int = 0
     search_results: int = 10
     # A repeated query must not spend an identity. Results for a given query rarely
     # churn hour to hour, so this can be generous.

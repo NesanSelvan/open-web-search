@@ -37,14 +37,14 @@ async def require_api_key(x_api_key: str = Header(default="", alias="X-API-Key")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing X-API-Key")
 
 
-def _unavailable(pool, detail: str) -> HTTPException:
+def _unavailable(pool, detail: str, retry_after_s: float | None = None) -> HTTPException:
     """503 for a pool that has nothing to search with, with an honest wait.
 
     The identity timers already know when the next one comes back, so the caller
     is told the real number instead of retrying blind into a pool that is parked
     precisely because it was hit too hard.
     """
-    wait = pool.health().get("ready_in_s")
+    wait = retry_after_s if retry_after_s is not None else pool.health().get("ready_in_s")
     headers = {"Retry-After": str(max(1, int(wait)))} if wait is not None else None
     return HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail, headers=headers)
 
@@ -111,7 +111,9 @@ async def _search(req: SearchRequest, request: Request) -> SearchResponse:
             timing=timing,
         )
     except SearchUnavailable as exc:
-        raise _unavailable(request.app.state.services.pool, str(exc)) from exc
+        raise _unavailable(
+            request.app.state.services.pool, str(exc), getattr(exc, "retry_after_s", None)
+        ) from exc
 
     hits = [
         SearchHit(url=r.url, title=r.title, snippet=r.snippet, rank=r.rank) for r in results
@@ -264,6 +266,7 @@ async def health(request: Request) -> dict:
         "concurrency": {
             **svc.admission.stats(),
             "coalescing": svc.searcher._flight.stats(),
+            "fresh_budget": svc.searcher.budget.stats(),
         },
         "cache": await svc.cache.stats(),
     }

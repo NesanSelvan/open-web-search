@@ -61,7 +61,12 @@ _ARGS = [
     "--disable-blink-features=AutomationControlled",
     "--no-first-run",
     "--no-default-browser-check",
-    "--disable-features=Translate,OptimizationHints",
+    # AcceptCHFrame: Google's HTTP/2 ACCEPT_CH frame makes Chrome abort and restart
+    # the navigation with client hints, and through an authenticated proxy that
+    # restart never goes out, so every google.com load hangs to its timeout. Off,
+    # client hints still arrive via the Accept-CH header. Chrome honours only the
+    # LAST --disable-features, so every feature belongs in this one flag.
+    "--disable-features=Translate,OptimizationHints,AcceptCHFrame",
     "--password-store=basic",
     "--start-maximized",
 ]

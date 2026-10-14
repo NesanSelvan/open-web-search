@@ -33,7 +33,10 @@ def make_request(pool, driver_alive: bool = True) -> types.SimpleNamespace:
             open_contexts=lambda: 0, open_tabs=lambda: 0, driver_alive=lambda: driver_alive
         ),
         admission=types.SimpleNamespace(stats=lambda: {"in_flight": 0}),
-        searcher=types.SimpleNamespace(_flight=types.SimpleNamespace(stats=lambda: {})),
+        searcher=types.SimpleNamespace(
+            _flight=types.SimpleNamespace(stats=lambda: {}),
+            budget=types.SimpleNamespace(stats=lambda: {}),
+        ),
         cache=types.SimpleNamespace(stats=stats),
     )
     return types.SimpleNamespace(app=types.SimpleNamespace(state=types.SimpleNamespace(services=services)))

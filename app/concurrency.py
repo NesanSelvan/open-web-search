@@ -176,3 +176,46 @@ class AdmissionControl:
             "admitted": self.admitted,
             "rejected": self.rejected,
         }
+
+
+class FreshSearchBudget:
+    """At most `per_min` fresh searches in any rolling 60 seconds, box-wide.
+
+    Identity cooldowns pace each profile, but every profile leaves through the
+    same exit IP, and the engine judges the IP. A burst spread across eight warm
+    identities stayed within every per-profile limit and still flagged the IP,
+    which then blocked all eight within a minute and stayed blocked for hours.
+    This caps the rate the IP sees. Over budget is refused at once with the exact
+    wait, so the caller falls back while the IP is still clean instead of after.
+    Cache hits and coalesced waiters never reach it. 0 disables it.
+    """
+
+    WINDOW_S = 60.0
+
+    def __init__(self, per_min: int, clock: Callable[[], float] = time.monotonic):
+        self.per_min = per_min
+        self._clock = clock
+        self._stamps: list[float] = []
+        self.refused = 0
+
+    def _trim(self, now: float) -> None:
+        cutoff = now - self.WINDOW_S
+        while self._stamps and self._stamps[0] <= cutoff:
+            self._stamps.pop(0)
+
+    def try_take(self) -> float | None:
+        """Spend one search. None when allowed, else seconds until one frees up."""
+        if self.per_min <= 0:
+            return None
+        now = self._clock()
+        self._trim(now)
+        if len(self._stamps) < self.per_min:
+            self._stamps.append(now)
+            return None
+        self.refused += 1
+        return max(0.0, self._stamps[0] + self.WINDOW_S - now)
+
+    def stats(self) -> dict:
+        if self.per_min > 0:
+            self._trim(self._clock())
+        return {"per_min": self.per_min, "used_last_min": len(self._stamps), "refused": self.refused}

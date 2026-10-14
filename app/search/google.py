@@ -21,7 +21,7 @@ from playwright.async_api import Page as PWPage
 
 from app.domain.models import SearchResult
 from app.search.browser import BrowserManager, chrome_context
-from app.concurrency import SingleFlight
+from app.concurrency import FreshSearchBudget, SingleFlight
 from app.search.identity import Identity, IdentityPool, Outcome, PoolExhausted
 from app.settings import Settings
 
@@ -130,6 +130,10 @@ class ExtractionFailed(RuntimeError):
 
 class SearchUnavailable(RuntimeError):
     """Every retry was exhausted. Caller may fall back to a paid SERP."""
+
+    def __init__(self, message: str, retry_after_s: float | None = None):
+        super().__init__(message)
+        self.retry_after_s = retry_after_s
 
 
 def build_query(
@@ -403,6 +407,7 @@ class GoogleSearcher:
         self._cache = cache
         # Ten concurrent requests for one query used to lease ten identities.
         self._flight = SingleFlight()
+        self.budget = FreshSearchBudget(settings.fresh_serp_per_min)
 
     async def search(
         self,
@@ -455,6 +460,15 @@ class GoogleSearcher:
         last: Exception | None = None
 
         for attempt in range(self._s.search_max_retries):
+            # Every attempt is one more hit on the exit IP, retries included.
+            wait = self.budget.try_take()
+            if wait is not None:
+                log.warning("fresh search budget spent (%d/min), refusing attempt=%d",
+                            self.budget.per_min, attempt + 1)
+                raise SearchUnavailable(
+                    f"fresh search budget spent ({self.budget.per_min}/min); last error: {last}",
+                    retry_after_s=wait,
+                )
             # Time spent WAITING for a free identity is not search work — it is
             # the pool being too small for the request rate, and it must be visible
             # as its own number or every slow request looks like a slow search.
